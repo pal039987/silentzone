@@ -1,0 +1,2 @@
+-keep class com.shubham.silentzone.data.** { *; }
+-keepattributes Signature,InnerClasses,EnclosingMethod
