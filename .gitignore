@@ -10,3 +10,10 @@
 *.jks
 *.keystore
 *.apk
+local.properties
+.kotlin/
+*.iml
+.idea/
+.gradle/
+build/
+app/build/
