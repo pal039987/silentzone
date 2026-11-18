@@ -29,24 +29,45 @@ object ZoneEvaluatorEngine {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun registerWifiWatcher(context: Context) {
-        if (networkCallbackRegistered) return
         runCatching {
             val appCtx = context.applicationContext
             val cm = appCtx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val request = NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .build()
-            cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    evaluateNow(appCtx)
-                }
 
-                override fun onLost(network: Network) {
-                    // Small delay so OS finishes dropping Wi-Fi state
-                    mainHandler.postDelayed({ evaluateNow(appCtx) }, 400L)
-                }
-            })
-            networkCallbackRegistered = true
+            // 1. OS-level PendingIntent callback wakes app even if killed in background!
+            val intent = Intent(appCtx, ZoneTriggerReceiver::class.java).apply {
+                action = ACTION_EVALUATE
+            }
+            val pi = PendingIntent.getBroadcast(
+                appCtx,
+                4042,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            cm.registerNetworkCallback(request, pi)
+
+            // 2. Live process callback with 6-second anti-flicker grace on disconnect
+            if (!networkCallbackRegistered) {
+                cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        mainHandler.postDelayed({ evaluateNow(appCtx) }, 500L)
+                    }
+
+                    override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                            evaluateNow(appCtx)
+                        }
+                    }
+
+                    override fun onLost(network: Network) {
+                        // 6-second grace window so weak fringe Wi-Fi or mesh handoff doesn't unmute prematurely
+                        mainHandler.postDelayed({ evaluateNow(appCtx) }, 6000L)
+                    }
+                })
+                networkCallbackRegistered = true
+            }
         }
     }
 
@@ -310,7 +331,7 @@ object ZoneEvaluatorEngine {
         val now = Calendar.getInstance()
         var earliestNextMillis: Long? = null
 
-        for (rule in rules.filter { it.triggerType == TriggerType.SCHEDULE }) {
+        for (rule in rules.filter { it.triggerType == TriggerType.SCHEDULE || it.triggerType == TriggerType.WIFI_ANY }) {
             val boundaries = listOf(rule.startHour to rule.startMinute, rule.endHour to rule.endMinute)
             for ((h, m) in boundaries) {
                 val candidate = Calendar.getInstance().apply {
@@ -326,7 +347,8 @@ object ZoneEvaluatorEngine {
             }
         }
 
-        val triggerAt = earliestNextMillis ?: (System.currentTimeMillis() + 15 * 60 * 1000L)
+        val twoMinsFromNow = System.currentTimeMillis() + 2 * 60 * 1000L
+        val triggerAt = if (earliestNextMillis != null && earliestNextMillis < twoMinsFromNow) earliestNextMillis else twoMinsFromNow
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && alarmManager.canScheduleExactAlarms()) {
                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)

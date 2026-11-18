@@ -43,11 +43,21 @@ object RadioFingerprintScanner {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun findConnectedWifiNetwork(cm: ConnectivityManager): android.net.Network? {
+        val active = cm.activeNetwork
+        if (active != null && cm.getNetworkCapabilities(active)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
+            return active
+        }
+        return cm.allNetworks.firstOrNull { net ->
+            cm.getNetworkCapabilities(net)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+    }
+
     fun isConnectedToWifi(context: Context): Boolean {
         return runCatching {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            findConnectedWifiNetwork(cm) != null
         }.getOrDefault(false)
     }
 
@@ -63,7 +73,7 @@ object RadioFingerprintScanner {
     fun getWifiNetworkSignature(context: Context): String? {
         return runCatching {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val network = cm.activeNetwork ?: return null
+            val network = findConnectedWifiNetwork(cm) ?: return null
             val caps = cm.getNetworkCapabilities(network) ?: return null
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
             val lp: LinkProperties = cm.getLinkProperties(network) ?: return null
