@@ -192,16 +192,28 @@ object ZoneEvaluatorEngine {
                         existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
                         existingPolicy?.suppressedVisualEffects ?: 0
                     )
-                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                    // Step 2: Force RINGER_MODE_SILENT (Calls + Notifications only) after ColorOS finishes DND transition
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                    // Step 1: Set RINGER_MODE_SILENT & zero ring/notif volume BEFORE enabling DND so ColorOS updates the Ring tile
+                    runCatching {
+                        audioManager.setStreamVolume(AudioManager.STREAM_RING, 0, 0)
+                        audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0)
+                        audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                    }
+                    // Step 2: Enable DND right after ringer mode transition
                     mainHandler.postDelayed({
                         runCatching {
-                            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_MUTE, 0)
-                            audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
+                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
                         }
-                    }, 250L)
+                    }, 120L)
+                    // Step 3: Re-assert RINGER_MODE_SILENT after ColorOS finishes DND transition
+                    mainHandler.postDelayed({
+                        runCatching {
+                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
+                                audioManager.setStreamVolume(AudioManager.STREAM_RING, 0, 0)
+                                audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0)
+                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            }
+                        }
+                    }, 600L)
                     true
                 }
             }
