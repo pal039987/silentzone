@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
@@ -26,7 +27,8 @@ data class RadioSnapshot(
     val cellSignatures: List<String>,
     val wifiBssid: String?,
     val wifiSsid: String?,
-    val isSystemLocationEnabled: Boolean = false
+    val isSystemLocationEnabled: Boolean = false,
+    val wifiNetworkSignature: String? = null
 )
 
 object RadioFingerprintScanner {
@@ -52,9 +54,49 @@ object RadioFingerprintScanner {
     fun captureCurrentEnvironment(context: Context): RadioSnapshot {
         val wifiConnected = isConnectedToWifi(context)
         val locOn = isLocationEnabled(context)
+        val netSig = if (wifiConnected) getWifiNetworkSignature(context) else null
         val cells = if (locOn) getActiveCellSignatures(context) else emptyList()
         val (bssid, ssid) = if (locOn) getConnectedWifiInfo(context) else Pair(null, null)
-        return RadioSnapshot(wifiConnected, cells, bssid, ssid, locOn)
+        return RadioSnapshot(wifiConnected, cells, bssid, ssid, locOn, netSig)
+    }
+
+    fun getWifiNetworkSignature(context: Context): String? {
+        return runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return null
+            val caps = cm.getNetworkCapabilities(network) ?: return null
+            if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
+            val lp: LinkProperties = cm.getLinkProperties(network) ?: return null
+
+            val gateways = lp.routes
+                .filter { it.isDefaultRoute && it.gateway != null }
+                .mapNotNull { it.gateway?.hostAddress }
+                .sorted()
+                .joinToString(",")
+
+            val subnets = lp.linkAddresses
+                .mapNotNull { la ->
+                    val addr = la.address?.hostAddress ?: return@mapNotNull null
+                    if (addr.contains(":")) null else "$addr/${la.prefixLength}"
+                }
+                .map { cidr ->
+                    val parts = cidr.split("/")
+                    val octets = parts[0].split(".")
+                    if (octets.size == 4) "${octets[0]}.${octets[1]}.${octets[2]}.0/${parts[1]}" else cidr
+                }
+                .distinct()
+                .sorted()
+                .joinToString(",")
+
+            val dnsList = lp.dnsServers
+                .mapNotNull { it.hostAddress }
+                .filter { !it.contains(":") }
+                .sorted()
+                .joinToString(",")
+
+            val raw = "GW=$gateways|SUB=$subnets|DNS=$dnsList"
+            if (gateways.isBlank() && subnets.isBlank()) null else raw
+        }.getOrNull()
     }
 
     fun captureFreshEnvironmentAsync(context: Context, onResult: (RadioSnapshot) -> Unit) {

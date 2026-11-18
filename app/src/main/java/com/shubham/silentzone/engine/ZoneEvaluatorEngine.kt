@@ -72,6 +72,8 @@ object ZoneEvaluatorEngine {
             val appliedSuccessfully = applySilenceProfile(audioManager, notifManager, matchedRule.profile)
             val reason = when {
                 !appliedSuccessfully -> "DND Permission Needed to Mute"
+                matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiSsid.isNullOrBlank() -> "Locked Wi-Fi: ${matchedRule.wifiSsid} (0% GPS)"
+                matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiBssid.isNullOrBlank() -> "Locked Wi-Fi Router (0% GPS)"
                 matchedRule.triggerType == TriggerType.WIFI_ANY -> "Wi-Fi Connected (Location OFF)"
                 matchedRule.triggerType == TriggerType.SCHEDULE -> "Scheduled Quiet Window"
                 else -> "Tower / Wi-Fi Zone Active"
@@ -104,10 +106,34 @@ object ZoneEvaluatorEngine {
 
     private fun matchesRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
         return when (rule.triggerType) {
-            TriggerType.WIFI_ANY -> snapshot.isWifiConnected
+            TriggerType.WIFI_ANY -> matchesWifiRule(rule, snapshot)
             TriggerType.SCHEDULE -> matchesTimeWindow(rule)
             TriggerType.TOWER_WIFI -> matchesRadio(rule, snapshot)
         }
+    }
+
+    private fun matchesWifiRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
+        if (!snapshot.isWifiConnected) return false
+        val hasFingerprint = !rule.wifiBssid.isNullOrBlank() || !rule.wifiSsid.isNullOrBlank()
+        if (!hasFingerprint) return false
+
+        val hasTimeFilter = rule.activeDays.isNotEmpty() &&
+                !(rule.startHour == 0 && rule.startMinute == 0 && rule.endHour == 23 && rule.endMinute == 59 && rule.activeDays.size == 7)
+        if (hasTimeFilter && !matchesTimeWindow(rule)) return false
+
+        val sigMatch = !rule.wifiBssid.isNullOrBlank() &&
+                !snapshot.wifiNetworkSignature.isNullOrBlank() &&
+                rule.wifiBssid == snapshot.wifiNetworkSignature
+
+        val bssidMatch = !rule.wifiBssid.isNullOrBlank() &&
+                !snapshot.wifiBssid.isNullOrBlank() &&
+                rule.wifiBssid.equals(snapshot.wifiBssid, ignoreCase = true)
+
+        val ssidMatch = !rule.wifiSsid.isNullOrBlank() &&
+                !snapshot.wifiSsid.isNullOrBlank() &&
+                rule.wifiSsid.equals(snapshot.wifiSsid, ignoreCase = true)
+
+        return sigMatch || bssidMatch || ssidMatch
     }
 
     private fun matchesRadio(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
