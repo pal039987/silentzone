@@ -155,9 +155,19 @@ object ZoneEvaluatorEngine {
                     if (!notifManager.isNotificationPolicyAccessGranted) {
                         return false
                     }
-                    // Step 1: Enable strict DND (Total Silence)
-                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
-                    // Step 2: Force RINGER_MODE_SILENT after ColorOS finishes DND transition
+                    // Step 1: Enable DND while keeping Media & Alarms unlocked so user can watch videos freely
+                    val existingPolicy = notifManager.notificationPolicy
+                    val mediaAllowedCategories = (existingPolicy?.priorityCategories ?: 0) or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+                    notifManager.notificationPolicy = NotificationManager.Policy(
+                        mediaAllowedCategories,
+                        existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.suppressedVisualEffects ?: 0
+                    )
+                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                    // Step 2: Force RINGER_MODE_SILENT (Calls + Notifications only) after ColorOS finishes DND transition
                     audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
                     mainHandler.postDelayed({
                         runCatching {
