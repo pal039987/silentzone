@@ -169,43 +169,44 @@ object ZoneEvaluatorEngine {
             if (!notifManager.isNotificationPolicyAccessGranted) {
                 return false
             }
+            // Cancel any pending restoreNormalMode delayed callbacks so switching zones never overwrites new state
+            mainHandler.removeCallbacksAndMessages(null)
 
-            // Step 1: Configure DND Policy (keep Media & Alarms working; VIP Guard contacts ring through)
-            val existingPolicy = notifManager.notificationPolicy
-            val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
-                NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
-                NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
-            notifManager.notificationPolicy = NotificationManager.Policy(
-                allowedCategories,
-                existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                existingPolicy?.suppressedVisualEffects ?: 0
-            )
-
-            // Step 2: Enable DND for BOTH Silent and Vibrate modes
-            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-
-            // Step 3: Apply exact target Ringer Mode (Silent vs Vibrate) AFTER DND transition settles
-            val targetRingerMode = when (profile) {
-                SilenceProfile.TOTAL_SILENT -> AudioManager.RINGER_MODE_SILENT
-                SilenceProfile.VIBRATE_ONLY -> AudioManager.RINGER_MODE_VIBRATE
+            when (profile) {
+                SilenceProfile.TOTAL_SILENT -> {
+                    // Use INTERRUPTION_FILTER_NONE (Total Silence DND) + RINGER_MODE_SILENT so ColorOS/MIUI/OneUI
+                    // sets BOTH DND ON and Silent/Mute tile (never falling back to Vibrate)
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                    mainHandler.postDelayed({
+                        runCatching {
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+                        }
+                    }, 300L)
+                }
+                SilenceProfile.VIBRATE_ONLY -> {
+                    // Use INTERRUPTION_FILTER_PRIORITY (DND ON) + RINGER_MODE_VIBRATE so BOTH DND and Vibrate stay ON
+                    val existingPolicy = notifManager.notificationPolicy
+                    val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+                    notifManager.notificationPolicy = NotificationManager.Policy(
+                        allowedCategories,
+                        existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.suppressedVisualEffects ?: 0
+                    )
+                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                    mainHandler.postDelayed({
+                        runCatching {
+                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                        }
+                    }, 300L)
+                }
             }
-
-            runCatching { audioManager.ringerMode = targetRingerMode }
-            mainHandler.postDelayed({
-                runCatching {
-                    if (audioManager.ringerMode != targetRingerMode) {
-                        audioManager.ringerMode = targetRingerMode
-                    }
-                }
-            }, 250L)
-            mainHandler.postDelayed({
-                runCatching {
-                    if (audioManager.ringerMode != targetRingerMode) {
-                        audioManager.ringerMode = targetRingerMode
-                    }
-                }
-            }, 700L)
             true
         }.getOrDefault(false)
     }
@@ -214,6 +215,7 @@ object ZoneEvaluatorEngine {
         audioManager: AudioManager,
         notifManager: NotificationManager
     ) {
+        mainHandler.removeCallbacksAndMessages(null)
         runCatching {
             // Step 1: Turn OFF system DND first
             if (notifManager.isNotificationPolicyAccessGranted) {
