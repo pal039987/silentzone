@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.provider.CallLog
+import android.provider.ContactsContract
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -284,6 +286,11 @@ fun SilentZoneApp() {
                             ).show()
                         }
                     },
+                    onEditRule = { updatedRule ->
+                        repo.addOrUpdateRule(updatedRule)
+                        refreshAll()
+                        Toast.makeText(context, "Updated: ${updatedRule.name}", Toast.LENGTH_SHORT).show()
+                    },
                     onDeleteRule = { id ->
                         repo.deleteRule(id)
                         refreshAll()
@@ -352,12 +359,14 @@ fun DashboardScreen(
     vipConfig: VipGuardConfig,
     dndGranted: Boolean,
     onToggleRule: (String, Boolean) -> Unit,
+    onEditRule: (SilentZoneRule) -> Unit,
     onDeleteRule: (String) -> Unit,
     onNavigateAdd: () -> Unit,
     onRequestPerms: () -> Unit,
     onQuickRestoreRing: () -> Unit
 ) {
     val context = LocalContext.current
+    var editingRule by remember { mutableStateOf<SilentZoneRule?>(null) }
     val hasPhone = ContextCompat.checkSelfPermission(
         context, Manifest.permission.READ_PHONE_STATE
     ) == PackageManager.PERMISSION_GRANTED
@@ -672,10 +681,22 @@ fun DashboardScreen(
                 ZoneRuleCard(
                     rule = rule,
                     onToggle = { onToggleRule(rule.id, it) },
+                    onEdit = { editingRule = rule },
                     onDelete = { onDeleteRule(rule.id) }
                 )
             }
         }
+    }
+
+    editingRule?.let { target ->
+        EditZoneDialog(
+            rule = target,
+            onDismiss = { editingRule = null },
+            onSave = { updated ->
+                onEditRule(updated)
+                editingRule = null
+            }
+        )
     }
 }
 
@@ -719,6 +740,7 @@ fun StatusChipPill(
 fun ZoneRuleCard(
     rule: SilentZoneRule,
     onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val accent = categoryAccentColor(rule.category)
@@ -810,12 +832,20 @@ fun ZoneRuleCard(
                 }
             }
             Switch(checked = rule.isEnabled, onCheckedChange = onToggle)
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = "Edit Place Name",
+                    tint = Color(0xFF93C5FD),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Outlined.Delete,
                     contentDescription = "Delete",
                     tint = Color(0xFFF87171).copy(alpha = 0.85f),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -841,7 +871,9 @@ fun AddZoneScreen(
     var endMinute by remember { mutableIntStateOf(0) }
     var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6)) }
 
-    val categories = listOf("College", "Office", "Library", "Mandir", "Sleep")
+    val presetCategories = listOf("College", "Office", "Library", "Mandir", "Sleep")
+    var customCategory by remember { mutableStateOf("") }
+    var isCustomCategory by remember { mutableStateOf(false) }
     val dayPairs = listOf(
         2 to "Mon", 3 to "Tue", 4 to "Wed", 5 to "Thu", 6 to "Fri", 7 to "Sat", 1 to "Sun"
     )
@@ -873,15 +905,16 @@ fun AddZoneScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("1. Place Category & Name", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("1. Place Category & Custom Name", fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(categories) { cat ->
+                        items(presetCategories) { cat ->
                             FilterChip(
-                                selected = selectedCategory == cat,
+                                selected = !isCustomCategory && selectedCategory == cat,
                                 onClick = {
+                                    isCustomCategory = false
                                     selectedCategory = cat
-                                    if (name.isBlank() || categories.contains(name)) name = cat
+                                    if (name.isBlank() || presetCategories.contains(name)) name = cat
                                 },
                                 leadingIcon = {
                                     Icon(categoryIcon(cat), contentDescription = null, modifier = Modifier.size(16.dp))
@@ -889,12 +922,36 @@ fun AddZoneScreen(
                                 label = { Text(cat) }
                             )
                         }
+                        item {
+                            FilterChip(
+                                selected = isCustomCategory,
+                                onClick = { isCustomCategory = true },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Custom") }
+                            )
+                        }
+                    }
+                    if (isCustomCategory) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = customCategory,
+                            onValueChange = {
+                                customCategory = it
+                                selectedCategory = it.ifBlank { "Custom" }
+                            },
+                            label = { Text("Custom Place Category (e.g., Gym, Studio)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Zone Name (e.g., CS Dept, Office)") },
+                        label = { Text("Zone Display Name (Editable)") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -1131,13 +1188,337 @@ fun AddZoneScreen(
     }
 }
 
+data class DevicePhoneEntry(
+    val key: String,
+    val name: String,
+    val phoneNumber: String,
+    val sourceLabel: String
+)
+
+fun loadDeviceContactsAndRecents(context: Context): List<DevicePhoneEntry> {
+    val seenTenDigits = mutableSetOf<String>()
+    val entries = mutableListOf<DevicePhoneEntry>()
+
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+        runCatching {
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+            )
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    val rawName = if (nameIdx >= 0) cursor.getString(nameIdx)?.trim().orEmpty() else ""
+                    val rawNum = if (numIdx >= 0) cursor.getString(numIdx)?.trim().orEmpty() else ""
+                    val digits = rawNum.filter { it.isDigit() }
+                    if (digits.length >= 7) {
+                        val key = digits.takeLast(10)
+                        if (seenTenDigits.add(key)) {
+                            entries.add(
+                                DevicePhoneEntry(
+                                    key = key,
+                                    name = rawName.ifBlank { rawNum },
+                                    phoneNumber = rawNum,
+                                    sourceLabel = "Contact"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED) {
+        runCatching {
+            val projection = arrayOf(
+                CallLog.Calls.CACHED_NAME,
+                CallLog.Calls.NUMBER
+            )
+            context.contentResolver.query(
+                CallLog.Calls.CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${CallLog.Calls.DATE} DESC"
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(CallLog.Calls.CACHED_NAME)
+                val numIdx = cursor.getColumnIndex(CallLog.Calls.NUMBER)
+                var scanned = 0
+                while (cursor.moveToNext() && scanned < 80) {
+                    scanned++
+                    val cachedName = if (nameIdx >= 0) cursor.getString(nameIdx)?.trim().orEmpty() else ""
+                    val rawNum = if (numIdx >= 0) cursor.getString(numIdx)?.trim().orEmpty() else ""
+                    val digits = rawNum.filter { it.isDigit() }
+                    if (digits.length >= 7) {
+                        val key = digits.takeLast(10)
+                        if (seenTenDigits.add(key)) {
+                            entries.add(
+                                DevicePhoneEntry(
+                                    key = key,
+                                    name = cachedName.ifBlank { "Recent Caller" },
+                                    phoneNumber = rawNum,
+                                    sourceLabel = "Recent Call"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return entries
+}
+
+@Composable
+fun EditZoneDialog(
+    rule: SilentZoneRule,
+    onDismiss: () -> Unit,
+    onSave: (SilentZoneRule) -> Unit
+) {
+    val presetCategories = listOf("College", "Office", "Library", "Mandir", "Sleep")
+    var editedName by remember { mutableStateOf(rule.name) }
+    var editedCategory by remember { mutableStateOf(rule.category) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF151E32),
+        title = {
+            Text("Edit Place & Zone Name", fontWeight = FontWeight.Bold, color = Color.White)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Customize your zone name or place category:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF94A3B8)
+                )
+                OutlinedTextField(
+                    value = editedName,
+                    onValueChange = { editedName = it },
+                    label = { Text("Zone Name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = editedCategory,
+                    onValueChange = { editedCategory = it },
+                    label = { Text("Place Category (e.g., Office, Gym)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(presetCategories) { preset ->
+                        FilterChip(
+                            selected = editedCategory.equals(preset, ignoreCase = true),
+                            onClick = {
+                                editedCategory = preset
+                                if (editedName.isBlank()) editedName = preset
+                            },
+                            label = { Text(preset, fontSize = 12.sp) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalName = editedName.trim().ifBlank { rule.name }
+                    val finalCat = editedCategory.trim().ifBlank { rule.category }
+                    onSave(rule.copy(name = finalName, category = finalCat))
+                }
+            ) {
+                Text("Save Changes", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF94A3B8))
+            }
+        }
+    )
+}
+
+@Composable
+fun MultiContactPickerDialog(
+    existingContacts: List<VipContact>,
+    onDismiss: () -> Unit,
+    onConfirmSelection: (List<VipContact>) -> Unit
+) {
+    val context = LocalContext.current
+    var searchQuery by remember { mutableStateOf("") }
+    val allEntries = remember { loadDeviceContactsAndRecents(context) }
+    val existingKeys = remember(existingContacts) {
+        existingContacts.map { it.phoneNumber.filter { c -> c.isDigit() }.takeLast(10) }.toSet()
+    }
+    val selectedKeys = remember { mutableStateMapOf<String, Boolean>() }
+
+    val filtered = remember(searchQuery, allEntries) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) allEntries
+        else allEntries.filter {
+            it.name.lowercase().contains(q) || it.phoneNumber.contains(q)
+        }
+    }
+
+    val selectedCount = selectedKeys.count { it.value }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF151E32),
+        title = {
+            Column {
+                Text("Select VIP Contacts", fontWeight = FontWeight.Bold, color = Color.White)
+                Text(
+                    "Tick multiple contacts or recent callers to add at once",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF94A3B8)
+                )
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search name or number...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No contacts found. Ensure Contacts permission is allowed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        items(filtered, key = { it.key }) { entry ->
+                            val alreadySaved = existingKeys.contains(entry.key)
+                            val isChecked = alreadySaved || (selectedKeys[entry.key] == true)
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isChecked) Color(0xFF10B981).copy(alpha = 0.14f)
+                                        else Color(0xFF0D1321)
+                                    )
+                                    .clickable(enabled = !alreadySaved) {
+                                        selectedKeys[entry.key] = !(selectedKeys[entry.key] ?: false)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = isChecked,
+                                    enabled = !alreadySaved,
+                                    onCheckedChange = { checked ->
+                                        if (!alreadySaved) selectedKeys[entry.key] = checked
+                                    }
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        entry.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (alreadySaved) Color(0xFF94A3B8) else Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "${entry.phoneNumber} • ${if (alreadySaved) "Already VIP" else entry.sourceLabel}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (alreadySaved) Color(0xFF34D399) else Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = selectedCount > 0,
+                onClick = {
+                    val toAdd = allEntries
+                        .filter { selectedKeys[it.key] == true && !existingKeys.contains(it.key) }
+                        .map { VipContact(name = it.name, phoneNumber = it.phoneNumber) }
+                    onConfirmSelection(toAdd)
+                }
+            ) {
+                Text(
+                    if (selectedCount > 0) "Add Selected ($selectedCount)" else "Select Contacts",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF94A3B8))
+            }
+        }
+    )
+}
+
 @Composable
 fun VipGuardScreen(
     vipConfig: VipGuardConfig,
     onUpdateVip: (VipGuardConfig) -> Unit
 ) {
+    val context = LocalContext.current
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
+    var showMultiPicker by remember { mutableStateOf(false) }
+
+    val contactsPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        showMultiPicker = true
+    }
+
+    if (showMultiPicker) {
+        MultiContactPickerDialog(
+            existingContacts = vipConfig.contacts,
+            onDismiss = { showMultiPicker = false },
+            onConfirmSelection = { newlySelected ->
+                if (newlySelected.isNotEmpty()) {
+                    onUpdateVip(vipConfig.copy(contacts = vipConfig.contacts + newlySelected))
+                    Toast.makeText(
+                        context,
+                        "Added ${newlySelected.size} VIP contact(s)!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                showMultiPicker = false
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1213,8 +1594,48 @@ fun VipGuardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Add Trusted VIP Contact", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Add Trusted VIP Contacts", fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            val hasContacts = ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.READ_CONTACTS
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasContacts) {
+                                showMultiPicker = true
+                            } else {
+                                contactsPermLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.READ_CONTACTS,
+                                        Manifest.permission.READ_CALL_LOG
+                                    )
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        Icon(Icons.Default.GroupAdd, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Select Multiple Contacts / Calls", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = Color.White.copy(alpha = 0.08f))
+                        Text(
+                            "  OR ENTER MANUALLY  ",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B)
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = Color.White.copy(alpha = 0.08f))
+                    }
+                    Spacer(Modifier.height(10.dp))
+
                     OutlinedTextField(
                         value = contactName,
                         onValueChange = { contactName = it },
@@ -1233,7 +1654,7 @@ fun VipGuardScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             if (contactPhone.filter { it.isDigit() }.length >= 7) {
                                 val newContact = VipContact(
@@ -1241,16 +1662,17 @@ fun VipGuardScreen(
                                     phoneNumber = contactPhone.trim()
                                 )
                                 onUpdateVip(vipConfig.copy(contacts = vipConfig.contacts + newContact))
+                                Toast.makeText(context, "Added ${newContact.name} to VIP Guard!", Toast.LENGTH_SHORT).show()
                                 contactName = ""
                                 contactPhone = ""
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
                     ) {
                         Icon(Icons.Default.PersonAdd, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Add to VIP Whitelist", fontWeight = FontWeight.Bold)
+                        Text("Save Manual Number", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
