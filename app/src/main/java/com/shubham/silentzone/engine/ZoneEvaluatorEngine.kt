@@ -75,6 +75,7 @@ object ZoneEvaluatorEngine {
                 matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiSsid.isNullOrBlank() -> "Locked Wi-Fi: ${matchedRule.wifiSsid} (0% GPS)"
                 matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiBssid.isNullOrBlank() -> "Locked Wi-Fi Router (0% GPS)"
                 matchedRule.triggerType == TriggerType.WIFI_ANY -> "Wi-Fi Connected (Location OFF)"
+                matchedRule.triggerType == TriggerType.SCHEDULE && (!matchedRule.wifiSsid.isNullOrBlank() || !matchedRule.wifiBssid.isNullOrBlank()) -> "Wi-Fi + Time: ${matchedRule.wifiSsid ?: "Locked Wi-Fi"}"
                 matchedRule.triggerType == TriggerType.SCHEDULE -> "Scheduled Quiet Window"
                 else -> "Tower / Wi-Fi Zone Active"
             }
@@ -107,7 +108,14 @@ object ZoneEvaluatorEngine {
     private fun matchesRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
         return when (rule.triggerType) {
             TriggerType.WIFI_ANY -> matchesWifiRule(rule, snapshot)
-            TriggerType.SCHEDULE -> matchesTimeWindow(rule)
+            TriggerType.SCHEDULE -> {
+                val hasLockedWifi = !rule.wifiBssid.isNullOrBlank() || !rule.wifiSsid.isNullOrBlank()
+                if (hasLockedWifi) {
+                    matchesTimeWindow(rule) && matchesWifiRule(rule, snapshot)
+                } else {
+                    matchesTimeWindow(rule)
+                }
+            }
             TriggerType.TOWER_WIFI -> matchesRadio(rule, snapshot)
         }
     }
