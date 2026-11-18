@@ -171,35 +171,49 @@ object ZoneEvaluatorEngine {
             }
             mainHandler.removeCallbacksAndMessages(null)
 
+            // Always allow Media & Alarms in DND Policy; silence ONLY Calls & Notifications
+            // (VIP Guard starred/repeat callers remain allowed via existing priorityCallSenders)
+            val existingPolicy = notifManager.notificationPolicy
+            val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
+                NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
+                NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+            notifManager.notificationPolicy = NotificationManager.Policy(
+                allowedCategories,
+                existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                existingPolicy?.suppressedVisualEffects ?: 0
+            )
+
             when (profile) {
                 SilenceProfile.TOTAL_SILENT -> {
-                    // Step 1: Unlock ColorOS Vibrate state by resetting DND & stepping through NORMAL -> SILENT first
+                    // Step 1: Reset any stuck Vibrate state on ColorOS/Realme/MIUI before enabling Priority DND
                     if (audioManager.ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
                         notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
                         audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
                     }
                     audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
 
-                    // Step 2: Enable DND after ringer is safely in SILENT mode
+                    // Step 2: Enable PRIORITY DND (keeps Media & Alarms unlocked!) + enforce RINGER_MODE_SILENT
                     mainHandler.postDelayed({
                         runCatching {
+                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
                             audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
                         }
-                    }, 180L)
+                    }, 150L)
+
+                    // Step 3: Re-verify RINGER_MODE_SILENT after OEM DND transition settles (without touching Media/Alarm)
                     mainHandler.postDelayed({
                         runCatching {
                             if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
                                 audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                                notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
                             }
                         }
-                    }, 450L)
+                    }, 400L)
                 }
                 SilenceProfile.VIBRATE_ONLY -> {
-                    // Pure Vibrate mode (ColorOS/Realme disables DND when Vibrate is active, so keep DND clean OFF)
-                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                    // Enable Priority DND (Calls & Notifications only, Media & Alarms free) + Vibrate:
+                    // Simultaneous DND+Vibrate on Vivo/Samsung/Pixel/Xiaomi, clean Vibrate on ColorOS/Realme
+                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
                     audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
                     mainHandler.postDelayed({
                         runCatching {
