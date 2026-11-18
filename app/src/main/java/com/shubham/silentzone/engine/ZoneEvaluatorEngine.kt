@@ -181,7 +181,7 @@ object ZoneEvaluatorEngine {
                     if (!notifManager.isNotificationPolicyAccessGranted) {
                         return false
                     }
-                    // Step 1: Enable DND while keeping Media & Alarms unlocked so user can watch videos freely
+                    // Step 1: Configure DND policy (allow Media & Alarms so videos/alarms keep working)
                     val existingPolicy = notifManager.notificationPolicy
                     val mediaAllowedCategories = (existingPolicy?.priorityCategories ?: 0) or
                         NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
@@ -192,28 +192,28 @@ object ZoneEvaluatorEngine {
                         existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
                         existingPolicy?.suppressedVisualEffects ?: 0
                     )
-                    // Step 1: Set RINGER_MODE_SILENT & zero ring/notif volume BEFORE enabling DND so ColorOS updates the Ring tile
+                    // Step 2: Enable DND first
+                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+
+                    // Step 3: Set RINGER_MODE_SILENT WITHOUT calling setStreamVolume(0),
+                    // because calling setStreamVolume(STREAM_RING, 0) forces Android OEMs (ColorOS/MIUI/OneUI) into VIBRATE mode!
                     runCatching {
-                        audioManager.setStreamVolume(AudioManager.STREAM_RING, 0, 0)
-                        audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0)
                         audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
                     }
-                    // Step 2: Enable DND right after ringer mode transition
-                    mainHandler.postDelayed({
-                        runCatching {
-                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                        }
-                    }, 120L)
-                    // Step 3: Re-assert RINGER_MODE_SILENT after ColorOS finishes DND transition
                     mainHandler.postDelayed({
                         runCatching {
                             if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                audioManager.setStreamVolume(AudioManager.STREAM_RING, 0, 0)
-                                audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, 0, 0)
                                 audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
                             }
                         }
-                    }, 600L)
+                    }, 250L)
+                    mainHandler.postDelayed({
+                        runCatching {
+                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
+                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            }
+                        }
+                    }, 700L)
                     true
                 }
             }
