@@ -166,57 +166,47 @@ object ZoneEvaluatorEngine {
         profile: SilenceProfile
     ): Boolean {
         return runCatching {
-            when (profile) {
-                SilenceProfile.VIBRATE_ONLY -> {
-                    if (notifManager.isNotificationPolicyAccessGranted) {
-                        notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-                    }
-                    mainHandler.postDelayed({
-                        runCatching { audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE }
-                    }, 150L)
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
-                    true
-                }
-                SilenceProfile.TOTAL_SILENT -> {
-                    if (!notifManager.isNotificationPolicyAccessGranted) {
-                        return false
-                    }
-                    // Step 1: Configure DND policy (allow Media & Alarms so videos/alarms keep working)
-                    val existingPolicy = notifManager.notificationPolicy
-                    val mediaAllowedCategories = (existingPolicy?.priorityCategories ?: 0) or
-                        NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
-                        NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
-                    notifManager.notificationPolicy = NotificationManager.Policy(
-                        mediaAllowedCategories,
-                        existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                        existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                        existingPolicy?.suppressedVisualEffects ?: 0
-                    )
-                    // Step 2: Enable DND first
-                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-
-                    // Step 3: Set RINGER_MODE_SILENT WITHOUT calling setStreamVolume(0),
-                    // because calling setStreamVolume(STREAM_RING, 0) forces Android OEMs (ColorOS/MIUI/OneUI) into VIBRATE mode!
-                    runCatching {
-                        audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                    }
-                    mainHandler.postDelayed({
-                        runCatching {
-                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            }
-                        }
-                    }, 250L)
-                    mainHandler.postDelayed({
-                        runCatching {
-                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            }
-                        }
-                    }, 700L)
-                    true
-                }
+            if (!notifManager.isNotificationPolicyAccessGranted) {
+                return false
             }
+
+            // Step 1: Configure DND Policy (keep Media & Alarms working; VIP Guard contacts ring through)
+            val existingPolicy = notifManager.notificationPolicy
+            val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
+                NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
+                NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+            notifManager.notificationPolicy = NotificationManager.Policy(
+                allowedCategories,
+                existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                existingPolicy?.suppressedVisualEffects ?: 0
+            )
+
+            // Step 2: Enable DND for BOTH Silent and Vibrate modes
+            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+
+            // Step 3: Apply exact target Ringer Mode (Silent vs Vibrate) AFTER DND transition settles
+            val targetRingerMode = when (profile) {
+                SilenceProfile.TOTAL_SILENT -> AudioManager.RINGER_MODE_SILENT
+                SilenceProfile.VIBRATE_ONLY -> AudioManager.RINGER_MODE_VIBRATE
+            }
+
+            runCatching { audioManager.ringerMode = targetRingerMode }
+            mainHandler.postDelayed({
+                runCatching {
+                    if (audioManager.ringerMode != targetRingerMode) {
+                        audioManager.ringerMode = targetRingerMode
+                    }
+                }
+            }, 250L)
+            mainHandler.postDelayed({
+                runCatching {
+                    if (audioManager.ringerMode != targetRingerMode) {
+                        audioManager.ringerMode = targetRingerMode
+                    }
+                }
+            }, 700L)
+            true
         }.getOrDefault(false)
     }
 
