@@ -50,6 +50,7 @@ class ZoneGuardService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var screenReceiver: android.content.BroadcastReceiver? = null
 
     private val periodicCheck = object : Runnable {
         override fun run() {
@@ -73,6 +74,7 @@ class ZoneGuardService : Service() {
             startForeground(NOTIF_ID, notif)
         }
         registerWifiCallback()
+        registerScreenReceiver()
         handler.post(periodicCheck)
     }
 
@@ -103,7 +105,42 @@ class ZoneGuardService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(periodicCheck)
         unregisterWifiCallback()
+        unregisterScreenReceiver()
         super.onDestroy()
+    }
+
+    private fun registerScreenReceiver() {
+        runCatching {
+            val filter = android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            val rx = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    handler.postDelayed({
+                        ZoneEvaluatorEngine.evaluateNow(applicationContext)
+                        if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
+                            stopSelf()
+                        } else {
+                            updateNotification()
+                        }
+                    }, 400L)
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(rx, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(rx, filter)
+            }
+            screenReceiver = rx
+        }
+    }
+
+    private fun unregisterScreenReceiver() {
+        runCatching {
+            screenReceiver?.let { unregisterReceiver(it) }
+            screenReceiver = null
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

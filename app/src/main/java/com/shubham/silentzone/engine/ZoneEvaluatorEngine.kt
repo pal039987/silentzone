@@ -119,6 +119,24 @@ object ZoneEvaluatorEngine {
                 )
             )
         } else if (currentStatus.isMutedByApp) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val isScreenOn = pm.isInteractive
+            val activeRule = rules.firstOrNull { it.name == currentStatus.activeZoneName }
+            val timeStillValidOrUnused = activeRule == null ||
+                    !activeRule.isTimeTriggerActive() ||
+                    matchesTimeWindow(activeRule)
+
+            // If screen is OFF and scheduled time hasn't expired, keep zone locked (prevent Wi-Fi sleep unmute)
+            if (!isScreenOn && timeStillValidOrUnused) {
+                if (activeRule != null) {
+                    applySilenceProfile(audioManager, notifManager, activeRule.profile)
+                }
+                scheduleNextBoundaryAlarm(context, rules)
+                WakeTriggerRegistrar.syncOsWakeTriggers(context)
+                ZoneGuardService.syncServiceState(context)
+                return
+            }
+
             restoreNormalMode(audioManager, notifManager)
             repo.saveStatus(
                 ActiveZoneStatus(
