@@ -143,7 +143,7 @@ object ZoneEvaluatorEngine {
                 AudioManager.RINGER_MODE_NORMAL
             }
 
-            val appliedSuccessfully = applySilenceProfile(audioManager, notifManager, matchedRule.profile)
+            val appliedSuccessfully = applySilenceProfile(context, audioManager, notifManager, matchedRule.profile, matchedRule.name)
             val matchedTriggers = mutableListOf<String>()
             if (matchedRule.isWifiTriggerActive() && matchesWifiOnly(matchedRule, snapshot)) {
                 matchedTriggers.add("Wi-Fi (${matchedRule.wifiSsid ?: "Locked"})")
@@ -175,22 +175,46 @@ object ZoneEvaluatorEngine {
             val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             val isScreenOn = pm.isInteractive
             val activeRule = rules.firstOrNull { it.name == currentStatus.activeZoneName }
-            val timeStillValidOrUnused = activeRule == null ||
-                    !activeRule.isTimeTriggerActive() ||
-                    matchesTimeWindow(activeRule)
 
-            // If screen is OFF and scheduled time hasn't expired, keep zone locked (prevent Wi-Fi sleep unmute)
-            if (!isScreenOn && timeStillValidOrUnused) {
-                if (activeRule != null) {
-                    applySilenceProfile(audioManager, notifManager, activeRule.profile)
-                }
+            // If rule was deleted or disabled by user, unmute immediately!
+            if (activeRule == null) {
+                restoreNormalMode(context, audioManager, notifManager)
+                repo.saveStatus(
+                    ActiveZoneStatus(
+                        isMutedByApp = false,
+                        activeZoneName = null,
+                        matchedReason = "Normal Ring Mode",
+                        lastEvaluatedAt = System.currentTimeMillis(),
+                        previousRingerMode = AudioManager.RINGER_MODE_NORMAL
+                    )
+                )
                 scheduleNextBoundaryAlarm(context, rules)
                 WakeTriggerRegistrar.syncOsWakeTriggers(context)
                 ZoneGuardService.syncServiceState(context)
                 return
             }
 
-            restoreNormalMode(audioManager, notifManager)
+            // If Time trigger is active and its window has expired (and neither Wi-Fi nor Location matches), unmute cleanly
+            val timeExpired = activeRule.isTimeTriggerActive() && !matchesTimeWindow(activeRule)
+            val wifiExplicitlyDisconnected = activeRule.isWifiTriggerActive() && !snapshot.isWifiConnected
+            val locationExplicitlyExited = activeRule.isLocationTriggerActive() &&
+                    activeRule.latitude != null && activeRule.longitude != null &&
+                    snapshot.latitude != null && snapshot.longitude != null &&
+                    !matchesLocationOnly(activeRule, snapshot)
+
+            // Keep zone LOCKED if screen is OFF (unless time expired) OR if Wi-Fi/GPS is still waking up
+            val keepLocked = (!isScreenOn && !timeExpired) ||
+                    (!timeExpired && !wifiExplicitlyDisconnected && !locationExplicitlyExited)
+
+            if (keepLocked) {
+                applySilenceProfile(context, audioManager, notifManager, activeRule.profile, activeRule.name)
+                scheduleNextBoundaryAlarm(context, rules)
+                WakeTriggerRegistrar.syncOsWakeTriggers(context)
+                ZoneGuardService.syncServiceState(context)
+                return
+            }
+
+            restoreNormalMode(context, audioManager, notifManager)
             repo.saveStatus(
                 ActiveZoneStatus(
                     isMutedByApp = false,
@@ -268,9 +292,11 @@ object ZoneEvaluatorEngine {
     }
 
     private fun applySilenceProfile(
+        context: Context,
         audioManager: AudioManager,
         notifManager: NotificationManager,
-        profile: SilenceProfile
+        profile: SilenceProfile,
+        zoneName: String? = null
     ): Boolean {
         return runCatching {
             if (!notifManager.isNotificationPolicyAccessGranted) {
@@ -280,41 +306,13 @@ object ZoneEvaluatorEngine {
 
             when (profile) {
                 SilenceProfile.TOTAL_SILENT -> {
-                    val existingPolicy = notifManager.notificationPolicy
-                    val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
-                        NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
-                        NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
-                    notifManager.notificationPolicy = NotificationManager.Policy(
-                        allowedCategories,
-                        existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                        existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                        existingPolicy?.suppressedVisualEffects ?: 0
-                    )
-
-                    if (audioManager.ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
-                        notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-                        audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                    }
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-
+                    // Use OS-owned AutomaticZenRule so Android OS automatically restores Normal Ring if app is uninstalled!
+                    setOsOwnedDndState(context, notifManager, true, zoneName)
                     audioHandler.postDelayed({
                         runCatching {
-                            if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_PRIORITY) {
-                                notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                            }
-                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            }
+                            setOsOwnedDndState(context, notifManager, true, zoneName)
                         }
-                    }, 150L)
-
-                    audioHandler.postDelayed({
-                        runCatching {
-                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
-                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                            }
-                        }
-                    }, 400L)
+                    }, 200L)
                 }
                 SilenceProfile.VIBRATE_ONLY -> {
                     // Keep DND OFF (INTERRUPTION_FILTER_ALL) so ColorOS/Realme never flickers DND icon
@@ -341,13 +339,17 @@ object ZoneEvaluatorEngine {
     }
 
     private fun restoreNormalMode(
+        context: Context,
         audioManager: AudioManager,
         notifManager: NotificationManager
     ) {
         audioHandler.removeCallbacksAndMessages(null)
         runCatching {
-            // Step 1: Turn OFF system DND first
-            if (notifManager.isNotificationPolicyAccessGranted) {
+            // Step 1: Deactivate OS-owned AutomaticZenRule & ensure system DND is OFF
+            setOsOwnedDndState(context, notifManager, false, null)
+            if (notifManager.isNotificationPolicyAccessGranted &&
+                notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
+            ) {
                 notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
             }
             // Step 2: Immediately set Normal Ring + unmute streams
@@ -390,7 +392,7 @@ object ZoneEvaluatorEngine {
         if (isVipContact || isRepeatEmergency) {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val notifManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            restoreNormalMode(audioManager, notifManager)
+            restoreNormalMode(context, audioManager, notifManager)
             val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
             audioManager.setStreamVolume(AudioManager.STREAM_RING, maxVol, 0)
         }
