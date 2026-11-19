@@ -364,6 +364,10 @@ object ZoneEvaluatorEngine {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        if (rules.isEmpty()) {
+            runCatching { alarmManager.cancel(pi) }
+            return
+        }
 
         val now = Calendar.getInstance()
         var earliestNextMillis: Long? = null

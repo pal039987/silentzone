@@ -8,11 +8,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -31,8 +28,9 @@ class ZoneGuardService : Service() {
 
         fun syncServiceState(context: Context) {
             val repo = ZoneRepository(context)
+            val hasEnabledRules = repo.getRules().any { it.isEnabled }
             val status = repo.getStatus()
-            val shouldRunGuard = status.isMutedByApp
+            val shouldRunGuard = hasEnabledRules && status.isMutedByApp
             val intent = Intent(context, ZoneGuardService::class.java)
             runCatching {
                 if (shouldRunGuard) {
@@ -43,20 +41,23 @@ class ZoneGuardService : Service() {
                     }
                 } else {
                     context.stopService(intent)
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.cancel(NOTIF_ID)
                 }
             }
         }
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var screenReceiver: android.content.BroadcastReceiver? = null
 
     private val periodicCheck = object : Runnable {
         override fun run() {
             ZoneEvaluatorEngine.evaluateNow(applicationContext)
-            if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
-                stopSelf()
+            val repo = ZoneRepository(applicationContext)
+            val stillActive = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
+            if (!stillActive) {
+                stopGuardCleanly()
                 return
             }
             updateNotification()
@@ -73,49 +74,69 @@ class ZoneGuardService : Service() {
         } else {
             startForeground(NOTIF_ID, notif)
         }
-        registerWifiCallback()
         registerScreenReceiver()
-        handler.post(periodicCheck)
+        handler.postDelayed(periodicCheck, 60_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Always satisfy startForeground immediately first so Android OS never kills the service for timeout/flicker
-        updateNotification()
-        handler.post {
-            ZoneEvaluatorEngine.evaluateNow(applicationContext)
-            if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
-                stopSelf()
-            } else {
-                updateNotification()
-            }
+        val repo = ZoneRepository(applicationContext)
+        val shouldRun = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
+        if (!shouldRun) {
+            stopGuardCleanly()
+            return START_NOT_STICKY
         }
+        updateNotification()
         return START_STICKY
     }
 
+    private fun stopGuardCleanly() {
+        handler.removeCallbacks(periodicCheck)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIF_ID)
+        }
+        stopSelf()
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Immediately schedule self-restart when user swipes app away from Recents
-        val restartIntent = Intent(applicationContext, ZoneGuardService::class.java)
-        val pi = PendingIntent.getService(
-            applicationContext,
-            1002,
-            restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 1000L, pi)
+        val repo = ZoneRepository(applicationContext)
+        val shouldRestart = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
+        if (shouldRestart) {
+            val restartIntent = Intent(applicationContext, ZoneGuardService::class.java)
+            val pi = PendingIntent.getService(
+                applicationContext,
+                1002,
+                restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 1000L, pi)
+        }
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(periodicCheck)
-        unregisterWifiCallback()
         unregisterScreenReceiver()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIF_ID)
+        }
         super.onDestroy()
     }
 
     private fun registerScreenReceiver() {
         runCatching {
-            val filter = android.content.IntentFilter().apply {
+            val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
@@ -123,12 +144,14 @@ class ZoneGuardService : Service() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
                     handler.postDelayed({
                         ZoneEvaluatorEngine.evaluateNow(applicationContext)
-                        if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
-                            stopSelf()
+                        val repo = ZoneRepository(applicationContext)
+                        val stillActive = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
+                        if (!stillActive) {
+                            stopGuardCleanly()
                         } else {
                             updateNotification()
                         }
-                    }, 400L)
+                    }, 300L)
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -149,40 +172,6 @@ class ZoneGuardService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun registerWifiCallback() {
-        runCatching {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val req = NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .build()
-            val cb = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    handler.postDelayed({
-                        ZoneEvaluatorEngine.evaluateNow(applicationContext)
-                        updateNotification()
-                    }, 500L)
-                }
-
-                override fun onLost(network: Network) {
-                    handler.postDelayed({
-                        ZoneEvaluatorEngine.evaluateNow(applicationContext)
-                        updateNotification()
-                    }, 500L)
-                }
-            }
-            cm.registerNetworkCallback(req, cb)
-            networkCallback = cb
-        }
-    }
-
-    private fun unregisterWifiCallback() {
-        runCatching {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            networkCallback?.let { cm.unregisterNetworkCallback(it) }
-            networkCallback = null
-        }
-    }
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -190,7 +179,7 @@ class ZoneGuardService : Service() {
                 "SilentZone Background Guard",
                 NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Keeps auto-silent zones active even after app is closed"
+                description = "Active only while inside a SilentZone"
                 setShowBadge(false)
             }
             val nm = getSystemService(NotificationManager::class.java)
@@ -200,11 +189,7 @@ class ZoneGuardService : Service() {
 
     private fun buildNotification(): Notification {
         val status = ZoneRepository(applicationContext).getStatus()
-        val title = if (status.isMutedByApp) {
-            "Active Zone: ${status.activeZoneName ?: "Muted"}"
-        } else {
-            "SilentZone Guard Monitoring"
-        }
+        val title = "Active Zone: ${status.activeZoneName ?: "Muted"}"
         val text = status.matchedReason
         val openAppIntent = PendingIntent.getActivity(
             this,

@@ -61,6 +61,7 @@
                 <action android:name="android.net.wifi.STATE_CHANGE" />
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
                 <action android:name="com.shubham.silentzone.ACTION_EVALUATE_ZONES" />
+                <action android:name="com.shubham.silentzone.ACTION_PROXIMITY_ALERT" />
             </intent-filter>
         </receiver>
 
