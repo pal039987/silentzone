@@ -755,10 +755,7 @@ fun ZoneRuleCard(
             val label = rule.wifiSsid?.takeIf { it.isNotBlank() } ?: "Locked Wi-Fi Router"
             if (hasCustomTime) "$label • $timeText • Location OFF" else "$label • Location OFF"
         }
-        TriggerType.SCHEDULE -> {
-            val hasWifi = !rule.wifiBssid.isNullOrBlank() || !rule.wifiSsid.isNullOrBlank()
-            if (hasWifi) "${rule.wifiSsid ?: "Locked Wi-Fi"} • $timeText" else "$timeText • Location OFF"
-        }
+        TriggerType.SCHEDULE -> "$timeText • Location OFF"
         TriggerType.TOWER_WIFI -> "${rule.cellSignatures.size} Towers • Location ON"
     }
     val triggerIcon = when (rule.triggerType) {
@@ -992,7 +989,7 @@ fun AddZoneScreen(
                                 selected = triggerType == TriggerType.SCHEDULE,
                                 onClick = { triggerType = TriggerType.SCHEDULE },
                                 leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Wi-Fi + Time") }
+                                label = { Text("Time (No Location)") }
                             )
                         }
                         item {
@@ -1191,77 +1188,6 @@ fun AddZoneScreen(
                                                 selectedDays = if (active) selectedDays - dayInt else selectedDays + dayInt
                                             },
                                             label = { Text(label) }
-                                        )
-                                    }
-                                }
-                                Button(
-                                    onClick = {
-                                        if (!RadioFingerprintScanner.isConnectedToWifi(context)) {
-                                            Toast.makeText(context, "Connect to your Office/Target Wi-Fi first!", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            val netSig = RadioFingerprintScanner.getWifiNetworkSignature(context)
-                                            val (_, optionalSsid) = RadioFingerprintScanner.getConnectedWifiInfo(context)
-                                            if (!netSig.isNullOrBlank()) {
-                                                val displayLabel = optionalSsid ?: name.ifBlank { selectedCategory }
-                                                snapshot = snapshot.copy(
-                                                    isWifiConnected = true,
-                                                    wifiBssid = netSig,
-                                                    wifiSsid = displayLabel,
-                                                    wifiNetworkSignature = netSig
-                                                )
-                                                Toast.makeText(context, "Locked '$displayLabel' router with Time!", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, "Could not read Wi-Fi router signature. Try again.", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.WifiLock, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        if (!snapshot.wifiBssid.isNullOrBlank())
-                                            "Locked Wi-Fi: ${snapshot.wifiSsid ?: "Office Wi-Fi"}"
-                                        else
-                                            "Lock Wi-Fi Area (Optional)",
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                if (!snapshot.wifiBssid.isNullOrBlank()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = Color(0xFF10B981).copy(alpha = 0.12f),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                "Wi-Fi + Time Locked! Mutes only when connected to '${snapshot.wifiSsid}' during selected hours.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color(0xFF6EE7B7),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            TextButton(onClick = {
-                                                snapshot = snapshot.copy(wifiBssid = null, wifiSsid = null, wifiNetworkSignature = null)
-                                            }) {
-                                                Text("Clear", color = Color(0xFFF87171))
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = Color(0xFF1E293B),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            "Tip: Tap 'Lock Wi-Fi Area' above to mute ONLY at that Wi-Fi during this time, or leave unlocked for Time-only schedule.",
-                                            modifier = Modifier.padding(10.dp),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF94A3B8)
                                         )
                                     }
                                 }
