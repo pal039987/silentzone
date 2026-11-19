@@ -132,6 +132,7 @@ object ZoneEvaluatorEngine {
         }
 
         scheduleNextBoundaryAlarm(context, rules)
+        WakeTriggerRegistrar.syncOsWakeTriggers(context)
         ZoneGuardService.syncServiceState(context)
     }
 

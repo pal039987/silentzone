@@ -45,6 +45,11 @@
                 android:value="Continuous audio profile automation based on user-configured Wi-Fi, schedule, and micro-location zones" />
         </service>
 
+        <service
+            android:name=".engine.WifiWakeJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
+
         <receiver
             android:name=".engine.ZoneTriggerReceiver"
             android:exported="true">

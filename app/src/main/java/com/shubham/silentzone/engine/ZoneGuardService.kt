@@ -31,10 +31,11 @@ class ZoneGuardService : Service() {
 
         fun syncServiceState(context: Context) {
             val repo = ZoneRepository(context)
-            val hasEnabledRules = repo.getRules().any { it.isEnabled }
+            val status = repo.getStatus()
+            val shouldRunGuard = status.isMutedByApp
             val intent = Intent(context, ZoneGuardService::class.java)
             runCatching {
-                if (hasEnabledRules) {
+                if (shouldRunGuard) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(intent)
                     } else {
@@ -53,6 +54,10 @@ class ZoneGuardService : Service() {
     private val periodicCheck = object : Runnable {
         override fun run() {
             ZoneEvaluatorEngine.evaluateNow(applicationContext)
+            if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
+                stopSelf()
+                return
+            }
             updateNotification()
             handler.postDelayed(this, 45_000L)
         }
@@ -73,6 +78,10 @@ class ZoneGuardService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ZoneEvaluatorEngine.evaluateNow(applicationContext)
+        if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         updateNotification()
         return START_STICKY
     }
