@@ -26,7 +26,9 @@ class ZoneRepository(context: Context) {
     fun addOrUpdateRule(rule: SilentZoneRule) {
         val targetKey = normalizePlaceKey(rule.name)
         val current = getRules().map { existing ->
-            if (rule.isEnabled && existing.id != rule.id && normalizePlaceKey(existing.name) == targetKey) {
+            val samePlace = normalizePlaceKey(existing.name) == targetKey
+            val oppositeProfile = existing.profile != rule.profile
+            if (rule.isEnabled && existing.id != rule.id && (samePlace || oppositeProfile)) {
                 existing.copy(isEnabled = false)
             } else {
                 existing
@@ -42,20 +44,23 @@ class ZoneRepository(context: Context) {
         val current = getRules()
         val targetRule = current.find { it.id == id } ?: return null
         val targetKey = normalizePlaceKey(targetRule.name)
-        var disabledOtherName: String? = null
+        val disabledNames = mutableListOf<String>()
 
         val updated = current.map { rule ->
+            val samePlace = normalizePlaceKey(rule.name) == targetKey
+            val oppositeProfile = rule.profile != targetRule.profile
             when {
                 rule.id == id -> rule.copy(isEnabled = enabled)
-                enabled && normalizePlaceKey(rule.name) == targetKey && rule.isEnabled -> {
-                    disabledOtherName = "${rule.name} (${if (rule.profile == SilenceProfile.VIBRATE_ONLY) "Vibrate" else "Total Silent"})"
+                enabled && rule.isEnabled && (samePlace || oppositeProfile) -> {
+                    val modeLabel = if (rule.profile == SilenceProfile.VIBRATE_ONLY) "Vibrate" else "Silent"
+                    disabledNames.add("${rule.name} ($modeLabel)")
                     rule.copy(isEnabled = false)
                 }
                 else -> rule
             }
         }
         saveRules(updated)
-        return disabledOtherName
+        return disabledNames.firstOrNull()
     }
 
     fun deleteRule(id: String) {

@@ -3,9 +3,9 @@ package com.shubham.silentzone.data
 import java.util.UUID
 
 enum class TriggerType {
-    WIFI_ANY,     // Zero-Location: Any Wi-Fi connected
-    SCHEDULE,     // Zero-Location: Exact Time & Day window
-    TOWER_WIFI    // Optional: Specific Cell-ID / Wi-Fi BSSID (needs Location toggle ON)
+    WIFI_ANY,     // Legacy / primary tag
+    SCHEDULE,     // Legacy / primary tag
+    TOWER_WIFI    // Legacy / primary tag
 }
 
 enum class SilenceProfile {
@@ -18,6 +18,9 @@ data class SilentZoneRule(
     val name: String,
     val category: String = "College",
     val triggerType: TriggerType = TriggerType.WIFI_ANY,
+    val wifiEnabled: Boolean? = null,
+    val timeEnabled: Boolean? = null,
+    val locationEnabled: Boolean? = null,
     val cellSignatures: List<String> = emptyList(),
     val wifiBssid: String? = null,
     val wifiSsid: String? = null,
@@ -28,7 +31,11 @@ data class SilentZoneRule(
     val activeDays: List<Int> = listOf(2, 3, 4, 5, 6),
     val profile: SilenceProfile = SilenceProfile.VIBRATE_ONLY,
     val isEnabled: Boolean = true
-)
+) {
+    fun isWifiTriggerActive(): Boolean = wifiEnabled ?: (triggerType == TriggerType.WIFI_ANY)
+    fun isTimeTriggerActive(): Boolean = timeEnabled ?: (triggerType == TriggerType.SCHEDULE)
+    fun isLocationTriggerActive(): Boolean = locationEnabled ?: (triggerType == TriggerType.TOWER_WIFI)
+}
 
 data class VipContact(
     val id: String = UUID.randomUUID().toString(),

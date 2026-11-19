@@ -91,13 +91,22 @@ object ZoneEvaluatorEngine {
             }
 
             val appliedSuccessfully = applySilenceProfile(audioManager, notifManager, matchedRule.profile)
-            val reason = when {
-                !appliedSuccessfully -> "DND Permission Needed to Mute"
-                matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiSsid.isNullOrBlank() -> "Locked Wi-Fi: ${matchedRule.wifiSsid} (0% GPS)"
-                matchedRule.triggerType == TriggerType.WIFI_ANY && !matchedRule.wifiBssid.isNullOrBlank() -> "Locked Wi-Fi Router (0% GPS)"
-                matchedRule.triggerType == TriggerType.WIFI_ANY -> "Wi-Fi Connected (Location OFF)"
-                matchedRule.triggerType == TriggerType.SCHEDULE -> "Scheduled Quiet Window"
-                else -> "Tower / Wi-Fi Zone Active"
+            val matchedTriggers = mutableListOf<String>()
+            if (matchedRule.isWifiTriggerActive() && matchesWifiOnly(matchedRule, snapshot)) {
+                matchedTriggers.add("Wi-Fi (${matchedRule.wifiSsid ?: "Locked"})")
+            }
+            if (matchedRule.isTimeTriggerActive() && matchesTimeWindow(matchedRule)) {
+                matchedTriggers.add("Time")
+            }
+            if (matchedRule.isLocationTriggerActive() && matchesLocationOnly(matchedRule, snapshot)) {
+                matchedTriggers.add("Location")
+            }
+            val reason = if (!appliedSuccessfully) {
+                "DND Permission Needed to Mute"
+            } else if (matchedTriggers.isNotEmpty()) {
+                "Matched: ${matchedTriggers.joinToString(" + ")}"
+            } else {
+                "Zone Active"
             }
 
             repo.saveStatus(
@@ -126,21 +135,16 @@ object ZoneEvaluatorEngine {
     }
 
     private fun matchesRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
-        return when (rule.triggerType) {
-            TriggerType.WIFI_ANY -> matchesWifiRule(rule, snapshot)
-            TriggerType.SCHEDULE -> matchesTimeWindow(rule)
-            TriggerType.TOWER_WIFI -> matchesRadio(rule, snapshot)
-        }
+        val wifiHit = rule.isWifiTriggerActive() && matchesWifiOnly(rule, snapshot)
+        val timeHit = rule.isTimeTriggerActive() && matchesTimeWindow(rule)
+        val locationHit = rule.isLocationTriggerActive() && matchesLocationOnly(rule, snapshot)
+        return wifiHit || timeHit || locationHit
     }
 
-    private fun matchesWifiRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
+    private fun matchesWifiOnly(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
         if (!snapshot.isWifiConnected) return false
         val hasFingerprint = !rule.wifiBssid.isNullOrBlank() || !rule.wifiSsid.isNullOrBlank()
         if (!hasFingerprint) return false
-
-        val hasTimeFilter = rule.activeDays.isNotEmpty() &&
-                !(rule.startHour == 0 && rule.startMinute == 0 && rule.endHour == 23 && rule.endMinute == 59 && rule.activeDays.size == 7)
-        if (hasTimeFilter && !matchesTimeWindow(rule)) return false
 
         val sigMatch = !rule.wifiBssid.isNullOrBlank() &&
                 !snapshot.wifiNetworkSignature.isNullOrBlank() &&
@@ -157,12 +161,9 @@ object ZoneEvaluatorEngine {
         return sigMatch || bssidMatch || ssidMatch
     }
 
-    private fun matchesRadio(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
-        val wifiMatched = !rule.wifiBssid.isNullOrBlank() &&
-                rule.wifiBssid.equals(snapshot.wifiBssid, ignoreCase = true)
-        val cellMatched = rule.cellSignatures.isNotEmpty() &&
+    private fun matchesLocationOnly(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
+        return rule.cellSignatures.isNotEmpty() &&
                 rule.cellSignatures.any { saved -> snapshot.cellSignatures.contains(saved) }
-        return wifiMatched || cellMatched
     }
 
     private fun matchesTimeWindow(rule: SilentZoneRule): Boolean {
@@ -323,7 +324,7 @@ object ZoneEvaluatorEngine {
         val now = Calendar.getInstance()
         var earliestNextMillis: Long? = null
 
-        for (rule in rules.filter { it.triggerType == TriggerType.SCHEDULE || it.triggerType == TriggerType.WIFI_ANY }) {
+        for (rule in rules.filter { it.isTimeTriggerActive() }) {
             val boundaries = listOf(rule.startHour to rule.startMinute, rule.endHour to rule.endMinute)
             for ((h, m) in boundaries) {
                 val candidate = Calendar.getInstance().apply {

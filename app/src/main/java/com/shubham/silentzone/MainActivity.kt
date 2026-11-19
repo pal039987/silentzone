@@ -749,19 +749,21 @@ fun ZoneRuleCard(
         "%02d:%02d – %02d:%02d",
         rule.startHour, rule.startMinute, rule.endHour, rule.endMinute
     )
-    val hasCustomTime = !(rule.startHour == 0 && rule.startMinute == 0 && rule.endHour == 23 && rule.endMinute == 59 && rule.activeDays.size == 7)
-    val triggerSummary = when (rule.triggerType) {
-        TriggerType.WIFI_ANY -> {
-            val label = rule.wifiSsid?.takeIf { it.isNotBlank() } ?: "Locked Wi-Fi Router"
-            if (hasCustomTime) "$label • $timeText • Location OFF" else "$label • Location OFF"
-        }
-        TriggerType.SCHEDULE -> "$timeText • Location OFF"
-        TriggerType.TOWER_WIFI -> "${rule.cellSignatures.size} Towers • Location ON"
+    val activeParts = mutableListOf<String>()
+    if (rule.isWifiTriggerActive()) {
+        activeParts.add("Wi-Fi: ${rule.wifiSsid?.takeIf { it.isNotBlank() } ?: "Locked"}")
     }
-    val triggerIcon = when (rule.triggerType) {
-        TriggerType.WIFI_ANY -> Icons.Default.Wifi
-        TriggerType.SCHEDULE -> Icons.Default.Schedule
-        TriggerType.TOWER_WIFI -> Icons.Default.CellTower
+    if (rule.isTimeTriggerActive()) {
+        activeParts.add("Time: $timeText")
+    }
+    if (rule.isLocationTriggerActive()) {
+        activeParts.add("Loc: ${rule.cellSignatures.size} Towers")
+    }
+    val triggerSummary = if (activeParts.isEmpty()) "No active triggers" else activeParts.joinToString("  OR  ")
+    val triggerIcon = when {
+        rule.isWifiTriggerActive() -> Icons.Default.Wifi
+        rule.isTimeTriggerActive() -> Icons.Default.Schedule
+        else -> Icons.Default.CellTower
     }
 
     Card(
@@ -865,16 +867,18 @@ fun AddZoneScreen(
     val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("College") }
-    var triggerType by remember { mutableStateOf(TriggerType.WIFI_ANY) }
     var profile by remember { mutableStateOf(SilenceProfile.TOTAL_SILENT) }
     var snapshot by remember { mutableStateOf(RadioSnapshot(false, emptyList(), null, null)) }
+
+    var wifiToggleOn by remember { mutableStateOf(true) }
+    var timeToggleOn by remember { mutableStateOf(false) }
+    var locationToggleOn by remember { mutableStateOf(false) }
 
     var startHour by remember { mutableIntStateOf(9) }
     var startMinute by remember { mutableIntStateOf(0) }
     var endHour by remember { mutableIntStateOf(18) }
     var endMinute by remember { mutableIntStateOf(0) }
     var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7)) }
-    var limitWifiByTime by remember { mutableStateOf(false) }
 
     val presetCategories = listOf("College", "Office", "Library", "Mandir", "Sleep")
     var customCategory by remember { mutableStateOf("") }
@@ -896,7 +900,7 @@ fun AddZoneScreen(
                 color = Color.White
             )
             Text(
-                "Choose a place preset, trigger method, and silence profile.",
+                "Enable 1, 2, or all 3 triggers in one zone — ANY match activates your selected mode.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF94A3B8)
             )
@@ -972,45 +976,45 @@ fun AddZoneScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("2. Trigger Method", fontWeight = FontWeight.Bold, color = Color.White)
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        item {
-                            FilterChip(
-                                selected = triggerType == TriggerType.WIFI_ANY,
-                                onClick = { triggerType = TriggerType.WIFI_ANY },
-                                leadingIcon = { Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Wi-Fi (Location OFF)") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = triggerType == TriggerType.SCHEDULE,
-                                onClick = { triggerType = TriggerType.SCHEDULE },
-                                leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Time (No Location)") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = triggerType == TriggerType.TOWER_WIFI,
-                                onClick = { triggerType = TriggerType.TOWER_WIFI },
-                                leadingIcon = { Icon(Icons.Default.CellTower, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                label = { Text("Location (Cell Tower)") }
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("2. Smart Triggers (Any 1, 2, or All 3)", fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF10B981).copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                "OR LOGIC",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF6EE7B7)
                             )
                         }
                     }
 
-                    Spacer(Modifier.height(12.dp))
-
-                    when (triggerType) {
-                        TriggerType.WIFI_ANY -> {
-                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // TOGGLE 1: WI-FI
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF0D1321),
+                        border = BorderStroke(1.dp, if (wifiToggleOn) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Wifi, contentDescription = null, tint = if (wifiToggleOn) Color(0xFF34D399) else Color(0xFF64748B))
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Wi-Fi Trigger (0% GPS)", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Triggers when connected to locked Wi-Fi", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
+                                }
+                                Switch(checked = wifiToggleOn, onCheckedChange = { wifiToggleOn = it })
+                            }
+                            if (wifiToggleOn) {
                                 Button(
                                     onClick = {
                                         if (!RadioFingerprintScanner.isConnectedToWifi(context)) {
-                                            Toast.makeText(context, "Connect to your Office/Target Wi-Fi first!", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(context, "Connect to your Target Wi-Fi first!", Toast.LENGTH_LONG).show()
                                         } else {
                                             val netSig = RadioFingerprintScanner.getWifiNetworkSignature(context)
                                             val (_, optionalSsid) = RadioFingerprintScanner.getConnectedWifiInfo(context)
@@ -1022,7 +1026,7 @@ fun AddZoneScreen(
                                                     wifiSsid = displayLabel,
                                                     wifiNetworkSignature = netSig
                                                 )
-                                                Toast.makeText(context, "Locked '$displayLabel' router (Location OFF)!", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "Locked '$displayLabel' router!", Toast.LENGTH_SHORT).show()
                                             } else {
                                                 Toast.makeText(context, "Could not read Wi-Fi router signature. Try again.", Toast.LENGTH_SHORT).show()
                                             }
@@ -1041,105 +1045,43 @@ fun AddZoneScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-
                                 if (!snapshot.wifiBssid.isNullOrBlank()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = Color(0xFF10B981).copy(alpha = 0.12f),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                "Router Fingerprint Locked! Home, Cafe & other Wi-Fi networks will stay in Normal Ring mode — with Location 100% OFF.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color(0xFF6EE7B7),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            TextButton(onClick = {
-                                                snapshot = snapshot.copy(wifiBssid = null, wifiSsid = null, wifiNetworkSignature = null)
-                                            }) {
-                                                Text("Clear", color = Color(0xFFF87171))
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = Color(0xFF10B981).copy(alpha = 0.1f),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            "Zero-Location Tech: Connect to your Office Wi-Fi and tap above. Captures router Gateway/Subnet/DNS fingerprint with phone Location 100% OFF.",
-                                            modifier = Modifier.padding(12.dp),
+                                            "Router fingerprint saved!",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA7F3D0)
+                                            color = Color(0xFF6EE7B7),
+                                            modifier = Modifier.weight(1f)
                                         )
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Also Restrict by Working Hours", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 13.sp)
-                                        Text("Optional extra safety window", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
-                                    }
-                                    Switch(checked = limitWifiByTime, onCheckedChange = { limitWifiByTime = it })
-                                }
-
-                                if (limitWifiByTime) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                android.app.TimePickerDialog(
-                                                    context,
-                                                    { _, h, m -> startHour = h; startMinute = m },
-                                                    startHour, startMinute, false
-                                                ).show()
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(String.format(Locale.US, "Start %02d:%02d", startHour, startMinute))
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                android.app.TimePickerDialog(
-                                                    context,
-                                                    { _, h, m -> endHour = h; endMinute = m },
-                                                    endHour, endMinute, false
-                                                ).show()
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(String.format(Locale.US, "End %02d:%02d", endHour, endMinute))
-                                        }
-                                    }
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        items(dayPairs) { (dayInt, label) ->
-                                            val active = selectedDays.contains(dayInt)
-                                            FilterChip(
-                                                selected = active,
-                                                onClick = {
-                                                    selectedDays = if (active) selectedDays - dayInt else selectedDays + dayInt
-                                                },
-                                                label = { Text(label) }
-                                            )
+                                        TextButton(onClick = {
+                                            snapshot = snapshot.copy(wifiBssid = null, wifiSsid = null, wifiNetworkSignature = null)
+                                        }) {
+                                            Text("Clear", color = Color(0xFFF87171))
                                         }
                                     }
                                 }
                             }
                         }
-                        TriggerType.SCHEDULE -> {
-                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    }
+
+                    // TOGGLE 2: TIME SCHEDULE
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF0D1321),
+                        border = BorderStroke(1.dp, if (timeToggleOn) Color(0xFF60A5FA).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Schedule, contentDescription = null, tint = if (timeToggleOn) Color(0xFF60A5FA) else Color(0xFF64748B))
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Time & Days Trigger", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Triggers automatically during selected hours", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
+                                }
+                                Switch(checked = timeToggleOn, onCheckedChange = { timeToggleOn = it })
+                            }
+                            if (timeToggleOn) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1157,8 +1099,6 @@ fun AddZoneScreen(
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
                                         Text(String.format(Locale.US, "Start %02d:%02d", startHour, startMinute))
                                     }
                                     OutlinedButton(
@@ -1174,8 +1114,6 @@ fun AddZoneScreen(
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
                                         Text(String.format(Locale.US, "End %02d:%02d", endHour, endMinute))
                                     }
                                 }
@@ -1193,34 +1131,53 @@ fun AddZoneScreen(
                                 }
                             }
                         }
-                        TriggerType.TOWER_WIFI -> {
-                            Button(
-                                onClick = {
-                                    onRequestLocationPerm()
-                                    if (!RadioFingerprintScanner.isLocationEnabled(context)) {
-                                        Toast.makeText(context, "Turn ON Phone Location toggle first", Toast.LENGTH_LONG).show()
-                                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                                    } else {
-                                        RadioFingerprintScanner.captureFreshEnvironmentAsync(context) { fresh ->
-                                            snapshot = fresh
-                                            Toast.makeText(context, "Captured ${fresh.cellSignatures.size} towers", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.CellTower, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Lock Current Cell Towers")
+                    }
+
+                    // TOGGLE 3: LOCATION (CELL TOWER)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF0D1321),
+                        border = BorderStroke(1.dp, if (locationToggleOn) Color(0xFFFBBF24).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CellTower, contentDescription = null, tint = if (locationToggleOn) Color(0xFFFBBF24) else Color(0xFF64748B))
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Location Trigger (Cell Tower)", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Triggers when near saved area towers", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
+                                }
+                                Switch(checked = locationToggleOn, onCheckedChange = { locationToggleOn = it })
                             }
-                            if (snapshot.cellSignatures.isNotEmpty()) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    "Locked ${snapshot.cellSignatures.size} towers at current spot",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                            if (locationToggleOn) {
+                                Button(
+                                    onClick = {
+                                        onRequestLocationPerm()
+                                        if (!RadioFingerprintScanner.isLocationEnabled(context)) {
+                                            Toast.makeText(context, "Turn ON Phone Location toggle first", Toast.LENGTH_LONG).show()
+                                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                        } else {
+                                            RadioFingerprintScanner.captureFreshEnvironmentAsync(context) { fresh ->
+                                                snapshot = snapshot.copy(cellSignatures = fresh.cellSignatures)
+                                                Toast.makeText(context, "Captured ${fresh.cellSignatures.size} towers", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.CellTower, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Lock Current Cell Towers", fontWeight = FontWeight.Bold)
+                                }
+                                if (snapshot.cellSignatures.isNotEmpty()) {
+                                    Text(
+                                        "Locked ${snapshot.cellSignatures.size} towers at current spot",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
@@ -1236,7 +1193,7 @@ fun AddZoneScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("3. Silence Mode", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("3. Silence Mode (Only 1 Active Mode at a Time)", fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         FilterChip(
@@ -1272,42 +1229,51 @@ fun AddZoneScreen(
             Button(
                 onClick = {
                     val finalName = name.ifBlank { selectedCategory }
-                    if (triggerType == TriggerType.WIFI_ANY &&
-                        snapshot.wifiBssid.isNullOrBlank() &&
-                        snapshot.wifiSsid.isNullOrBlank()
-                    ) {
+                    if (!wifiToggleOn && !timeToggleOn && !locationToggleOn) {
                         Toast.makeText(
                             context,
-                            "Tap 'Lock Current Wi-Fi (Location OFF)' first so only that Wi-Fi mutes",
+                            "Enable at least 1 trigger (Wi-Fi, Time, or Location)",
                             Toast.LENGTH_LONG
                         ).show()
                         return@Button
                     }
-                    if (triggerType == TriggerType.TOWER_WIFI &&
-                        snapshot.cellSignatures.isEmpty() &&
-                        snapshot.wifiBssid == null
-                    ) {
+                    if (wifiToggleOn && snapshot.wifiBssid.isNullOrBlank() && snapshot.wifiSsid.isNullOrBlank()) {
                         Toast.makeText(
                             context,
-                            "Tap 'Lock Current Cell Towers' first or pick Wi-Fi / Time",
+                            "Tap 'Lock Current Wi-Fi (Location OFF)' or turn OFF Wi-Fi toggle",
                             Toast.LENGTH_LONG
                         ).show()
                         return@Button
                     }
-                    val useAllDayWifi = triggerType == TriggerType.WIFI_ANY && !limitWifiByTime
+                    if (locationToggleOn && snapshot.cellSignatures.isEmpty()) {
+                        Toast.makeText(
+                            context,
+                            "Tap 'Lock Current Cell Towers' or turn OFF Location toggle",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@Button
+                    }
+                    val primaryType = when {
+                        wifiToggleOn -> TriggerType.WIFI_ANY
+                        timeToggleOn -> TriggerType.SCHEDULE
+                        else -> TriggerType.TOWER_WIFI
+                    }
                     onSaveRule(
                         SilentZoneRule(
                             name = finalName,
                             category = selectedCategory,
-                            triggerType = triggerType,
-                            cellSignatures = snapshot.cellSignatures,
-                            wifiBssid = snapshot.wifiBssid,
-                            wifiSsid = if (!snapshot.wifiBssid.isNullOrBlank()) (snapshot.wifiSsid ?: finalName) else null,
-                            startHour = if (useAllDayWifi) 0 else startHour,
-                            startMinute = if (useAllDayWifi) 0 else startMinute,
-                            endHour = if (useAllDayWifi) 23 else endHour,
-                            endMinute = if (useAllDayWifi) 59 else endMinute,
-                            activeDays = if (useAllDayWifi) listOf(1, 2, 3, 4, 5, 6, 7) else selectedDays.toList(),
+                            triggerType = primaryType,
+                            wifiEnabled = wifiToggleOn,
+                            timeEnabled = timeToggleOn,
+                            locationEnabled = locationToggleOn,
+                            cellSignatures = if (locationToggleOn) snapshot.cellSignatures else emptyList(),
+                            wifiBssid = if (wifiToggleOn) snapshot.wifiBssid else null,
+                            wifiSsid = if (wifiToggleOn && !snapshot.wifiBssid.isNullOrBlank()) (snapshot.wifiSsid ?: finalName) else null,
+                            startHour = startHour,
+                            startMinute = startMinute,
+                            endHour = endHour,
+                            endMinute = endMinute,
+                            activeDays = selectedDays.toList(),
                             profile = profile
                         )
                     )
