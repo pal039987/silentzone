@@ -60,8 +60,12 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ZoneEvaluatorEngine.evaluateNow(this)
         setContent {
+            LaunchedEffect(Unit) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    ZoneEvaluatorEngine.evaluateNow(applicationContext)
+                }
+            }
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = Color(0xFF34D399),

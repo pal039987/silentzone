@@ -1,3 +1,8 @@
 <resources>
-    <style name="Theme.SilentZone" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.SilentZone" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#070B14</item>
+        <item name="android:colorBackground">#070B14</item>
+        <item name="android:statusBarColor">#070B14</item>
+        <item name="android:navigationBarColor">#070B14</item>
+    </style>
 </resources>
