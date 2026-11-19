@@ -25,6 +25,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -864,6 +866,7 @@ fun ZoneRuleCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddZoneScreen(
     dndGranted: Boolean,
@@ -922,8 +925,11 @@ fun AddZoneScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("1. Place Category & Custom Name", fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(Modifier.height(10.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(presetCategories, key = { it }) { cat ->
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        presetCategories.forEach { cat ->
                             FilterChip(
                                 selected = !isCustomCategory && selectedCategory == cat,
                                 onClick = {
@@ -937,16 +943,14 @@ fun AddZoneScreen(
                                 label = { Text(cat) }
                             )
                         }
-                        item {
-                            FilterChip(
-                                selected = isCustomCategory,
-                                onClick = { isCustomCategory = true },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                },
-                                label = { Text("Custom") }
-                            )
-                        }
+                        FilterChip(
+                            selected = isCustomCategory,
+                            onClick = { isCustomCategory = true },
+                            leadingIcon = {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text("Custom") }
+                        )
                     }
                     if (isCustomCategory) {
                         Spacer(Modifier.height(10.dp))
@@ -975,35 +979,33 @@ fun AddZoneScreen(
             }
         }
 
-        item(key = "add_step2", contentType = "card") {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, Color(0xFF28354F)),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                modifier = Modifier.fillMaxWidth()
+        item(key = "add_step2_header", contentType = "section_header") {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("2. Smart Triggers (Any 1, 2, or All 3)", fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF10B981).copy(alpha = 0.16f)
-                        ) {
-                            Text(
-                                "OR LOGIC",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF6EE7B7)
-                            )
-                        }
-                    }
+                Text("2. Smart Triggers (Any 1, 2, or All 3)", fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF10B981).copy(alpha = 0.16f)
+                ) {
+                    Text(
+                        "OR LOGIC",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF6EE7B7)
+                    )
+                }
+            }
+        }
 
+        item(key = "add_trigger_wifi", contentType = "trigger_card") {
                     // TOGGLE 1: WI-FI
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF0D1321),
-                        border = BorderStroke(1.dp, if (wifiToggleOn) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        color = Color(0xFF151E32),
+                        border = BorderStroke(1.dp, if (wifiToggleOn) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF28354F)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1070,11 +1072,14 @@ fun AddZoneScreen(
                         }
                     }
 
+        }
+
+        item(key = "add_trigger_time", contentType = "trigger_card") {
                     // TOGGLE 2: TIME SCHEDULE
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF0D1321),
-                        border = BorderStroke(1.dp, if (timeToggleOn) Color(0xFF60A5FA).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        color = Color(0xFF151E32),
+                        border = BorderStroke(1.dp, if (timeToggleOn) Color(0xFF60A5FA).copy(alpha = 0.45f) else Color(0xFF28354F)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1123,8 +1128,11 @@ fun AddZoneScreen(
                                         Text(String.format(Locale.US, "End %02d:%02d", endHour, endMinute))
                                     }
                                 }
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    items(dayPairs, key = { it.first }) { (dayInt, label) ->
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    dayPairs.forEach { (dayInt, label) ->
                                         val active = selectedDays.contains(dayInt)
                                         FilterChip(
                                             selected = active,
@@ -1139,11 +1147,14 @@ fun AddZoneScreen(
                         }
                     }
 
+        }
+
+        item(key = "add_trigger_loc", contentType = "trigger_card") {
                     // TOGGLE 3: LOCATION (CELL TOWER)
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF0D1321),
-                        border = BorderStroke(1.dp, if (locationToggleOn) Color(0xFFFBBF24).copy(alpha = 0.45f) else Color(0xFF1E293B)),
+                        color = Color(0xFF151E32),
+                        border = BorderStroke(1.dp, if (locationToggleOn) Color(0xFFFBBF24).copy(alpha = 0.45f) else Color(0xFF28354F)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1187,8 +1198,6 @@ fun AddZoneScreen(
                             }
                         }
                     }
-                }
-            }
         }
 
         item(key = "add_step3", contentType = "card") {
@@ -1390,6 +1399,7 @@ fun loadDeviceContactsAndRecents(context: Context): List<DevicePhoneEntry> {
     return entries
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditZoneDialog(
     rule: SilentZoneRule,
@@ -1429,8 +1439,11 @@ fun EditZoneDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(presetCategories) { preset ->
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    presetCategories.forEach { preset ->
                         FilterChip(
                             selected = editedCategory.equals(preset, ignoreCase = true),
                             onClick = {
