@@ -379,33 +379,28 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     var editingRule by remember { mutableStateOf<SilentZoneRule?>(null) }
-    val hasPhone = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.READ_PHONE_STATE
-    ) == PackageManager.PERMISSION_GRANTED
-    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-    val ignoringBattery = pm.isIgnoringBatteryOptimizations(context.packageName)
+    val hasPhone = remember(dndGranted, rules.size) {
+        ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+    val ignoringBattery = remember(dndGranted, rules.size) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
-    val cardGradient = when {
-        status.isMutedByApp -> Brush.linearGradient(
-            listOf(Color(0xFF064E3B), Color(0xFF022C22))
-        )
-        !dndGranted -> Brush.linearGradient(
-            listOf(Color(0xFF451A03), Color(0xFF271002))
-        )
-        else -> Brush.linearGradient(
-            listOf(Color(0xFF1E293B), Color(0xFF0F172A))
-        )
+    val cardGradient = remember(status.isMutedByApp, dndGranted) {
+        when {
+            status.isMutedByApp -> Brush.linearGradient(
+                listOf(Color(0xFF064E3B), Color(0xFF022C22))
+            )
+            !dndGranted -> Brush.linearGradient(
+                listOf(Color(0xFF451A03), Color(0xFF271002))
+            )
+            else -> Brush.linearGradient(
+                listOf(Color(0xFF1E293B), Color(0xFF0F172A))
+            )
+        }
     }
 
     val borderStrokeColor by animateColorAsState(
@@ -423,7 +418,7 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Hero Status Card
-        item {
+        item(key = "hero_status", contentType = "hero") {
             Card(
                 shape = RoundedCornerShape(24.dp),
                 border = BorderStroke(1.dp, borderStrokeColor),
@@ -437,7 +432,6 @@ fun DashboardScreen(
                         Box(
                             modifier = Modifier
                                 .size(58.dp)
-                                .scale(if (status.isMutedByApp) pulseScale else 1f)
                                 .clip(CircleShape)
                                 .background(
                                     when {
@@ -545,7 +539,7 @@ fun DashboardScreen(
 
         // Permissions Banner (if needed)
         if (!dndGranted || !hasPhone || !ignoringBattery) {
-            item {
+            item(key = "perm_banner", contentType = "banner") {
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
@@ -1476,7 +1470,12 @@ fun MultiContactPickerDialog(
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
-    val allEntries = remember { loadDeviceContactsAndRecents(context) }
+    var allEntries by remember { mutableStateOf<List<DevicePhoneEntry>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        allEntries = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            loadDeviceContactsAndRecents(context)
+        }
+    }
     val existingKeys = remember(existingContacts) {
         existingContacts.map { it.phoneNumber.filter { c -> c.isDigit() }.takeLast(10) }.toSet()
     }
