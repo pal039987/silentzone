@@ -76,6 +76,53 @@ object ZoneEvaluatorEngine {
         }
     }
 
+    private const val ZEN_RULE_PREF_ID = "silentzone_zen_rule_id"
+
+    private fun setOsOwnedDndState(context: Context, nm: NotificationManager, active: Boolean, zoneName: String?) {
+        if (!nm.isNotificationPolicyAccessGranted) return
+        val prefs = context.getSharedPreferences("silentzone_zen_prefs", Context.MODE_PRIVATE)
+        runCatching {
+            val existingId = prefs.getString(ZEN_RULE_PREF_ID, null)
+            val ruleName = "SilentZone Guard"
+            val configActivity = android.content.ComponentName(context, com.shubham.silentzone.MainActivity::class.java)
+            val conditionId = android.net.Uri.Builder()
+                .scheme("condition")
+                .authority(context.packageName)
+                .appendPath("active_zone")
+                .build()
+
+            var ruleId = existingId
+            if (ruleId == null || nm.getAutomaticZenRule(ruleId) == null) {
+                val zenRule = android.app.AutomaticZenRule(
+                    ruleName,
+                    null,
+                    configActivity,
+                    conditionId,
+                    null,
+                    NotificationManager.INTERRUPTION_FILTER_NONE,
+                    true
+                )
+                ruleId = nm.addAutomaticZenRule(zenRule)
+                prefs.edit().putString(ZEN_RULE_PREF_ID, ruleId).apply()
+            } else if (active && !zoneName.isNullOrBlank()) {
+                val currentRule = nm.getAutomaticZenRule(ruleId)
+                if (currentRule != null) {
+                    currentRule.name = "SilentZone: $zoneName"
+                    currentRule.interruptionFilter = NotificationManager.INTERRUPTION_FILTER_NONE
+                    currentRule.isEnabled = true
+                    nm.updateAutomaticZenRule(ruleId, currentRule)
+                }
+            }
+
+            if (ruleId != null) {
+                val state = if (active) android.service.notification.Condition.STATE_TRUE else android.service.notification.Condition.STATE_FALSE
+                val summary = if (active) "Active: ${zoneName ?: "SilentZone"}" else "Standby"
+                val condition = android.service.notification.Condition(conditionId, summary, state)
+                nm.setAutomaticZenRuleState(ruleId, condition)
+            }
+        }
+    }
+
     fun evaluateNow(context: Context) {
         registerWifiWatcher(context)
         val repo = ZoneRepository(context)
