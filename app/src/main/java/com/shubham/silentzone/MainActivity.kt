@@ -886,19 +886,19 @@ fun AddZoneScreen(
     var endMinute by remember { mutableIntStateOf(0) }
     var selectedDays by remember { mutableStateOf(setOf(2, 3, 4, 5, 6, 7)) }
 
-    val presetCategories = listOf("College", "Office", "Library", "Mandir", "Sleep")
+    val presetCategories = remember { listOf("College", "Office", "Library", "Mandir", "Sleep") }
     var customCategory by remember { mutableStateOf("") }
     var isCustomCategory by remember { mutableStateOf(false) }
-    val dayPairs = listOf(
-        2 to "Mon", 3 to "Tue", 4 to "Wed", 5 to "Thu", 6 to "Fri", 7 to "Sat", 1 to "Sun"
-    )
+    val dayPairs = remember {
+        listOf(2 to "Mon", 3 to "Tue", 4 to "Wed", 5 to "Thu", 6 to "Fri", 7 to "Sat", 1 to "Sun")
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+        item(key = "add_header", contentType = "header") {
             Text(
                 "Create Silent Zone",
                 style = MaterialTheme.typography.headlineSmall,
@@ -912,7 +912,7 @@ fun AddZoneScreen(
             )
         }
 
-        item {
+        item(key = "add_step1", contentType = "card") {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, Color(0xFF28354F)),
@@ -923,7 +923,7 @@ fun AddZoneScreen(
                     Text("1. Place Category & Custom Name", fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(presetCategories) { cat ->
+                        items(presetCategories, key = { it }) { cat ->
                             FilterChip(
                                 selected = !isCustomCategory && selectedCategory == cat,
                                 onClick = {
@@ -975,7 +975,7 @@ fun AddZoneScreen(
             }
         }
 
-        item {
+        item(key = "add_step2", contentType = "card") {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, Color(0xFF28354F)),
@@ -1124,7 +1124,7 @@ fun AddZoneScreen(
                                     }
                                 }
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    items(dayPairs) { (dayInt, label) ->
+                                    items(dayPairs, key = { it.first }) { (dayInt, label) ->
                                         val active = selectedDays.contains(dayInt)
                                         FilterChip(
                                             selected = active,
@@ -1191,7 +1191,7 @@ fun AddZoneScreen(
             }
         }
 
-        item {
+        item(key = "add_step3", contentType = "card") {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, Color(0xFF28354F)),
@@ -1231,7 +1231,7 @@ fun AddZoneScreen(
             }
         }
 
-        item {
+        item(key = "add_save_btn", contentType = "button") {
             Button(
                 onClick = {
                     val finalName = name.ifBlank { selectedCategory }
@@ -1396,7 +1396,7 @@ fun EditZoneDialog(
     onDismiss: () -> Unit,
     onSave: (SilentZoneRule) -> Unit
 ) {
-    val presetCategories = listOf("College", "Office", "Library", "Mandir", "Sleep")
+    val presetCategories = remember { listOf("College", "Office", "Library", "Mandir", "Sleep") }
     var editedName by remember { mutableStateOf(rule.name) }
     var editedCategory by remember { mutableStateOf(rule.category) }
 
@@ -1642,7 +1642,7 @@ fun VipGuardScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+        item(key = "vip_header", contentType = "header") {
             Text(
                 "VIP Emergency Guard",
                 style = MaterialTheme.typography.headlineSmall,
@@ -1656,7 +1656,7 @@ fun VipGuardScreen(
             )
         }
 
-        item {
+        item(key = "vip_toggles", contentType = "card") {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, Color(0xFF28354F)),
@@ -1703,7 +1703,7 @@ fun VipGuardScreen(
             }
         }
 
-        item {
+        item(key = "vip_add_card", contentType = "card") {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, Color(0xFF28354F)),
