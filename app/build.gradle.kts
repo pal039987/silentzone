@@ -12,8 +12,8 @@ android {
         applicationId = "com.shubham.silentzone"
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        versionName = "4.7"
+        versionCode = 31
+        versionName = "4.8"
     }
 
     signingConfigs {
