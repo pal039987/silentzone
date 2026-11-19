@@ -304,12 +304,12 @@ object ZoneEvaluatorEngine {
         if (!status.isMutedByApp) return
 
         val vipConfig = repo.getVipConfig()
-        if (!vipConfig.enabled || incomingNumber.isNullOrBlank()) return
+        if ((!vipConfig.enabled && !vipConfig.repeatCallerBypass) || incomingNumber.isNullOrBlank()) return
 
         val normalized = normalizePhone(incomingNumber)
         if (normalized.length < 7) return
 
-        val isVipContact = vipConfig.contacts.any { normalizePhone(it.phoneNumber) == normalized }
+        val isVipContact = vipConfig.enabled && vipConfig.contacts.any { normalizePhone(it.phoneNumber) == normalized }
         val callCount = repo.recordIncomingCall(normalized)
         val requiredCalls = vipConfig.repeatCallThreshold.coerceAtLeast(5)
         val isRepeatEmergency = vipConfig.repeatCallerBypass && callCount >= requiredCalls
