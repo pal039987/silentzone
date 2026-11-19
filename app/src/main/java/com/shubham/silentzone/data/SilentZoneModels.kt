@@ -24,7 +24,7 @@ data class SilentZoneRule(
     val cellSignatures: List<String> = emptyList(),
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val radiusMeters: Float = 30f,
+    val radiusMeters: Float = 40f,
     val wifiBssid: String? = null,
     val wifiSsid: String? = null,
     val startHour: Int = 9,

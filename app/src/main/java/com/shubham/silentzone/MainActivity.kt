@@ -757,7 +757,7 @@ fun ZoneRuleCard(
         activeParts.add("Time: $timeText")
     }
     if (rule.isLocationTriggerActive()) {
-        activeParts.add(if (rule.latitude != null) "Loc: 30m Spot" else "Loc: ${rule.cellSignatures.size} Towers")
+        activeParts.add(if (rule.latitude != null) "Loc: 40m Spot" else "Loc: ${rule.cellSignatures.size} Towers")
     }
     val triggerSummary = if (activeParts.isEmpty()) "No active triggers" else activeParts.joinToString("  OR  ")
     val triggerIcon = when {
@@ -1145,8 +1145,8 @@ fun AddZoneScreen(
                                 Icon(Icons.Default.CellTower, contentDescription = null, tint = if (locationToggleOn) Color(0xFFFBBF24) else Color(0xFF64748B))
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Micro-Location Trigger (30m Spot)", fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("Exits cleanly when you leave office floor/room (30m)", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
+                                    Text("Micro-Location Trigger (40m Spot)", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Exits cleanly when you leave office floor/room (40m)", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
                                 }
                                 Switch(checked = locationToggleOn, onCheckedChange = { locationToggleOn = it })
                             }
@@ -1169,11 +1169,11 @@ fun AddZoneScreen(
                                 ) {
                                     Icon(Icons.Default.CellTower, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Lock Exact Spot (30m Radius)", fontWeight = FontWeight.Bold)
+                                    Text("Lock Exact Spot (40m Radius)", fontWeight = FontWeight.Bold)
                                 }
                                 if (snapshot.latitude != null || snapshot.cellSignatures.isNotEmpty()) {
                                     Text(
-                                        if (snapshot.latitude != null) "Locked exact 30m office spot (+${snapshot.cellSignatures.size} towers)" else "Locked ${snapshot.cellSignatures.size} towers at current spot",
+                                        if (snapshot.latitude != null) "Locked exact 40m office spot (+${snapshot.cellSignatures.size} towers)" else "Locked ${snapshot.cellSignatures.size} towers at current spot",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -1269,7 +1269,7 @@ fun AddZoneScreen(
                             cellSignatures = if (locationToggleOn) snapshot.cellSignatures else emptyList(),
                             latitude = if (locationToggleOn) snapshot.latitude else null,
                             longitude = if (locationToggleOn) snapshot.longitude else null,
-                            radiusMeters = 30f,
+                            radiusMeters = 40f,
                             wifiBssid = if (wifiToggleOn) snapshot.wifiBssid else null,
                             wifiSsid = if (wifiToggleOn && !snapshot.wifiBssid.isNullOrBlank()) (snapshot.wifiSsid ?: finalName) else null,
                             startHour = startHour,
