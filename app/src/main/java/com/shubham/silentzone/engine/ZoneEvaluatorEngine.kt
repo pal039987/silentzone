@@ -132,6 +132,7 @@ object ZoneEvaluatorEngine {
         }
 
         scheduleNextBoundaryAlarm(context, rules)
+        ZoneGuardService.syncServiceState(context)
     }
 
     private fun matchesRule(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
