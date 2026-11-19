@@ -60,7 +60,7 @@ class ZoneGuardService : Service() {
                 return
             }
             updateNotification()
-            handler.postDelayed(this, 45_000L)
+            handler.postDelayed(this, 60_000L)
         }
     }
 
@@ -79,12 +79,16 @@ class ZoneGuardService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        ZoneEvaluatorEngine.evaluateNow(applicationContext)
-        if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        // Always satisfy startForeground immediately first so Android OS never kills the service for timeout/flicker
         updateNotification()
+        handler.post {
+            ZoneEvaluatorEngine.evaluateNow(applicationContext)
+            if (!ZoneRepository(applicationContext).getStatus().isMutedByApp) {
+                stopSelf()
+            } else {
+                updateNotification()
+            }
+        }
         return START_STICKY
     }
 

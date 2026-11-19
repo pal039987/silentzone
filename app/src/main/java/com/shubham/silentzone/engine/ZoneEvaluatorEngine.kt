@@ -26,7 +26,9 @@ object ZoneEvaluatorEngine {
 
     const val ACTION_EVALUATE = "com.shubham.silentzone.ACTION_EVALUATE_ZONES"
     private var networkCallbackRegistered = false
+    private var pendingIntentCallbackRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioHandler = Handler(Looper.getMainLooper())
 
     fun registerWifiWatcher(context: Context) {
         runCatching {
@@ -36,23 +38,26 @@ object ZoneEvaluatorEngine {
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .build()
 
-            // 1. OS-level PendingIntent callback wakes app even if killed in background!
-            val intent = Intent(appCtx, ZoneTriggerReceiver::class.java).apply {
-                action = ACTION_EVALUATE
+            // 1. OS-level PendingIntent callback wakes app even if killed in background (register ONCE to avoid 100-callback limit crash!)
+            if (!pendingIntentCallbackRegistered) {
+                val intent = Intent(appCtx, ZoneTriggerReceiver::class.java).apply {
+                    action = ACTION_EVALUATE
+                }
+                val pi = PendingIntent.getBroadcast(
+                    appCtx,
+                    4042,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                cm.registerNetworkCallback(request, pi)
+                pendingIntentCallbackRegistered = true
             }
-            val pi = PendingIntent.getBroadcast(
-                appCtx,
-                4042,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            cm.registerNetworkCallback(request, pi)
 
             // 2. Live process callback with 6-second anti-flicker grace on disconnect
             if (!networkCallbackRegistered) {
                 cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
-                        mainHandler.postDelayed({ evaluateNow(appCtx) }, 500L)
+                        audioHandler.postDelayed({ evaluateNow(appCtx) }, 500L)
                     }
 
                     override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -63,7 +68,7 @@ object ZoneEvaluatorEngine {
 
                     override fun onLost(network: Network) {
                         // 6-second grace window so weak fringe Wi-Fi or mesh handoff doesn't unmute prematurely
-                        mainHandler.postDelayed({ evaluateNow(appCtx) }, 6000L)
+                        audioHandler.postDelayed({ evaluateNow(appCtx) }, 6000L)
                     }
                 })
                 networkCallbackRegistered = true
@@ -223,7 +228,7 @@ object ZoneEvaluatorEngine {
             if (!notifManager.isNotificationPolicyAccessGranted) {
                 return false
             }
-            mainHandler.removeCallbacksAndMessages(null)
+            audioHandler.removeCallbacksAndMessages(null)
 
             when (profile) {
                 SilenceProfile.TOTAL_SILENT -> {
@@ -244,7 +249,7 @@ object ZoneEvaluatorEngine {
                     }
                     audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
 
-                    mainHandler.postDelayed({
+                    audioHandler.postDelayed({
                         runCatching {
                             if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_PRIORITY) {
                                 notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
@@ -255,7 +260,7 @@ object ZoneEvaluatorEngine {
                         }
                     }, 150L)
 
-                    mainHandler.postDelayed({
+                    audioHandler.postDelayed({
                         runCatching {
                             if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
                                 audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
@@ -271,7 +276,7 @@ object ZoneEvaluatorEngine {
                     if (audioManager.ringerMode != AudioManager.RINGER_MODE_VIBRATE) {
                         audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
                     }
-                    mainHandler.postDelayed({
+                    audioHandler.postDelayed({
                         runCatching {
                             if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
                                 notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
@@ -291,7 +296,7 @@ object ZoneEvaluatorEngine {
         audioManager: AudioManager,
         notifManager: NotificationManager
     ) {
-        mainHandler.removeCallbacksAndMessages(null)
+        audioHandler.removeCallbacksAndMessages(null)
         runCatching {
             // Step 1: Turn OFF system DND first
             if (notifManager.isNotificationPolicyAccessGranted) {
@@ -303,7 +308,7 @@ object ZoneEvaluatorEngine {
             audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
 
             // Step 3: Re-apply after 300ms so Realme/ColorOS doesn't leave phone stuck in Vibrate/Silent
-            mainHandler.postDelayed({
+            audioHandler.postDelayed({
                 runCatching {
                     audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
                     audioManager.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0)

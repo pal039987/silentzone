@@ -226,7 +226,8 @@ object RadioFingerprintScanner {
             var wifiInfo: WifiInfo? = null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+                val wifiNet = findConnectedWifiNetwork(cm)
+                val caps = if (wifiNet != null) cm.getNetworkCapabilities(wifiNet) else null
                 wifiInfo = caps?.transportInfo as? WifiInfo
             }
             if (wifiInfo == null) {

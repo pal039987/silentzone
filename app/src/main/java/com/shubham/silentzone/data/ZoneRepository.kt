@@ -82,7 +82,7 @@ class ZoneRepository(context: Context) {
     }
 
     fun saveStatus(status: ActiveZoneStatus) {
-        prefs.edit().putString("status_json", gson.toJson(status)).apply()
+        prefs.edit().putString("status_json", gson.toJson(status)).commit()
     }
 
     fun recordIncomingCall(normalizedNumber: String): Int {
