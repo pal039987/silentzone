@@ -757,7 +757,7 @@ fun ZoneRuleCard(
         activeParts.add("Time: $timeText")
     }
     if (rule.isLocationTriggerActive()) {
-        activeParts.add("Loc: ${rule.cellSignatures.size} Towers")
+        activeParts.add(if (rule.latitude != null) "Loc: 30m Spot" else "Loc: ${rule.cellSignatures.size} Towers")
     }
     val triggerSummary = if (activeParts.isEmpty()) "No active triggers" else activeParts.joinToString("  OR  ")
     val triggerIcon = when {
@@ -1145,8 +1145,8 @@ fun AddZoneScreen(
                                 Icon(Icons.Default.CellTower, contentDescription = null, tint = if (locationToggleOn) Color(0xFFFBBF24) else Color(0xFF64748B))
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Location Trigger (Cell Tower)", fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("Triggers when near saved area towers", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
+                                    Text("Micro-Location Trigger (30m Spot)", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Exits cleanly when you leave office floor/room (30m)", style = MaterialTheme.typography.bodySmall, color = Color(0xFF94A3B8))
                                 }
                                 Switch(checked = locationToggleOn, onCheckedChange = { locationToggleOn = it })
                             }
@@ -1159,7 +1159,7 @@ fun AddZoneScreen(
                                             context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                                         } else {
                                             RadioFingerprintScanner.captureFreshEnvironmentAsync(context) { fresh ->
-                                                snapshot = snapshot.copy(cellSignatures = fresh.cellSignatures)
+                                                snapshot = snapshot.copy(cellSignatures = fresh.cellSignatures, latitude = fresh.latitude, longitude = fresh.longitude)
                                                 Toast.makeText(context, "Captured ${fresh.cellSignatures.size} towers", Toast.LENGTH_SHORT).show()
                                             }
                                         }
@@ -1169,11 +1169,11 @@ fun AddZoneScreen(
                                 ) {
                                     Icon(Icons.Default.CellTower, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Lock Current Cell Towers", fontWeight = FontWeight.Bold)
+                                    Text("Lock Exact Spot (30m Radius)", fontWeight = FontWeight.Bold)
                                 }
-                                if (snapshot.cellSignatures.isNotEmpty()) {
+                                if (snapshot.latitude != null || snapshot.cellSignatures.isNotEmpty()) {
                                     Text(
-                                        "Locked ${snapshot.cellSignatures.size} towers at current spot",
+                                        if (snapshot.latitude != null) "Locked exact 30m office spot (+${snapshot.cellSignatures.size} towers)" else "Locked ${snapshot.cellSignatures.size} towers at current spot",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -1245,7 +1245,7 @@ fun AddZoneScreen(
                         ).show()
                         return@Button
                     }
-                    if (locationToggleOn && snapshot.cellSignatures.isEmpty()) {
+                    if (locationToggleOn && snapshot.latitude == null && snapshot.cellSignatures.isEmpty()) {
                         Toast.makeText(
                             context,
                             "Tap 'Lock Current Cell Towers' or turn OFF Location toggle",
@@ -1267,6 +1267,9 @@ fun AddZoneScreen(
                             timeEnabled = timeToggleOn,
                             locationEnabled = locationToggleOn,
                             cellSignatures = if (locationToggleOn) snapshot.cellSignatures else emptyList(),
+                            latitude = if (locationToggleOn) snapshot.latitude else null,
+                            longitude = if (locationToggleOn) snapshot.longitude else null,
+                            radiusMeters = 30f,
                             wifiBssid = if (wifiToggleOn) snapshot.wifiBssid else null,
                             wifiSsid = if (wifiToggleOn && !snapshot.wifiBssid.isNullOrBlank()) (snapshot.wifiSsid ?: finalName) else null,
                             startHour = startHour,

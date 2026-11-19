@@ -162,6 +162,18 @@ object ZoneEvaluatorEngine {
     }
 
     private fun matchesLocationOnly(rule: SilentZoneRule, snapshot: RadioSnapshot): Boolean {
+        if (!snapshot.isSystemLocationEnabled) return false
+        if (rule.latitude != null && rule.longitude != null &&
+            snapshot.latitude != null && snapshot.longitude != null
+        ) {
+            val results = FloatArray(1)
+            android.location.Location.distanceBetween(
+                rule.latitude, rule.longitude,
+                snapshot.latitude, snapshot.longitude,
+                results
+            )
+            return results[0] <= rule.radiusMeters
+        }
         return rule.cellSignatures.isNotEmpty() &&
                 rule.cellSignatures.any { saved -> snapshot.cellSignatures.contains(saved) }
     }
@@ -193,37 +205,36 @@ object ZoneEvaluatorEngine {
             }
             mainHandler.removeCallbacksAndMessages(null)
 
-            // Always allow Media & Alarms in DND Policy; silence ONLY Calls & Notifications
-            // (VIP Guard starred/repeat callers remain allowed via existing priorityCallSenders)
-            val existingPolicy = notifManager.notificationPolicy
-            val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
-                NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
-                NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
-            notifManager.notificationPolicy = NotificationManager.Policy(
-                allowedCategories,
-                existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
-                existingPolicy?.suppressedVisualEffects ?: 0
-            )
-
             when (profile) {
                 SilenceProfile.TOTAL_SILENT -> {
-                    // Step 1: Reset any stuck Vibrate state on ColorOS/Realme/MIUI before enabling Priority DND
+                    val existingPolicy = notifManager.notificationPolicy
+                    val allowedCategories = (existingPolicy?.priorityCategories ?: 0) or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA or
+                        NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS
+                    notifManager.notificationPolicy = NotificationManager.Policy(
+                        allowedCategories,
+                        existingPolicy?.priorityCallSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.priorityMessageSenders ?: NotificationManager.Policy.PRIORITY_SENDERS_STARRED,
+                        existingPolicy?.suppressedVisualEffects ?: 0
+                    )
+
                     if (audioManager.ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
                         notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
                         audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
                     }
                     audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
 
-                    // Step 2: Enable PRIORITY DND (keeps Media & Alarms unlocked!) + enforce RINGER_MODE_SILENT
                     mainHandler.postDelayed({
                         runCatching {
-                            notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_PRIORITY) {
+                                notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                            }
+                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
+                                audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            }
                         }
                     }, 150L)
 
-                    // Step 3: Re-verify RINGER_MODE_SILENT after OEM DND transition settles (without touching Media/Alarm)
                     mainHandler.postDelayed({
                         runCatching {
                             if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
@@ -233,13 +244,21 @@ object ZoneEvaluatorEngine {
                     }, 400L)
                 }
                 SilenceProfile.VIBRATE_ONLY -> {
-                    // Enable Priority DND (Calls & Notifications only, Media & Alarms free) + Vibrate:
-                    // Simultaneous DND+Vibrate on Vivo/Samsung/Pixel/Xiaomi, clean Vibrate on ColorOS/Realme
-                    notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                    // Keep DND OFF (INTERRUPTION_FILTER_ALL) so ColorOS/Realme never flickers DND icon
+                    if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
+                        notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                    }
+                    if (audioManager.ringerMode != AudioManager.RINGER_MODE_VIBRATE) {
+                        audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                    }
                     mainHandler.postDelayed({
                         runCatching {
-                            audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                            if (notifManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
+                                notifManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                            }
+                            if (audioManager.ringerMode != AudioManager.RINGER_MODE_VIBRATE) {
+                                audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                            }
                         }
                     }, 200L)
                 }

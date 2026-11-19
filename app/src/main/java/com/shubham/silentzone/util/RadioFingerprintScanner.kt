@@ -3,6 +3,7 @@ package com.shubham.silentzone.util
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
@@ -28,7 +29,9 @@ data class RadioSnapshot(
     val wifiBssid: String?,
     val wifiSsid: String?,
     val isSystemLocationEnabled: Boolean = false,
-    val wifiNetworkSignature: String? = null
+    val wifiNetworkSignature: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 object RadioFingerprintScanner {
@@ -61,13 +64,36 @@ object RadioFingerprintScanner {
         }.getOrDefault(false)
     }
 
+
+    @Suppress("DEPRECATION")
+    fun getBestLastKnownLocation(context: Context): Pair<Double, Double>? {
+        val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasFine && !hasCoarse || !isLocationEnabled(context)) return null
+        return runCatching {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+            var best: Location? = null
+            for (p in providers) {
+                if (lm.isProviderEnabled(p)) {
+                    val loc = lm.getLastKnownLocation(p) ?: continue
+                    if (best == null || loc.accuracy < best.accuracy) {
+                        best = loc
+                    }
+                }
+            }
+            best?.let { Pair(it.latitude, it.longitude) }
+        }.getOrNull()
+    }
+
     fun captureCurrentEnvironment(context: Context): RadioSnapshot {
         val wifiConnected = isConnectedToWifi(context)
         val locOn = isLocationEnabled(context)
         val netSig = if (wifiConnected) getWifiNetworkSignature(context) else null
         val cells = if (locOn) getActiveCellSignatures(context) else emptyList()
         val (bssid, ssid) = if (locOn) getConnectedWifiInfo(context) else Pair(null, null)
-        return RadioSnapshot(wifiConnected, cells, bssid, ssid, locOn, netSig)
+        val coords = if (locOn) getBestLastKnownLocation(context) else null
+        return RadioSnapshot(wifiConnected, cells, bssid, ssid, locOn, netSig, coords?.first, coords?.second)
     }
 
     fun getWifiNetworkSignature(context: Context): String? {
@@ -131,19 +157,19 @@ object RadioFingerprintScanner {
                             val parsed = parseCellInfoList(cellInfo).ifEmpty {
                                 getActiveCellSignatures(context)
                             }
-                            onResult(RadioSnapshot(wifiConnected, parsed, bssid, ssid, locOn))
+                            val c = getBestLastKnownLocation(context); onResult(RadioSnapshot(wifiConnected, parsed, bssid, ssid, locOn, getWifiNetworkSignature(context), c?.first, c?.second))
                         }
 
                         override fun onError(errorCode: Int, detail: Throwable?) {
-                            onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn))
+                            val c = getBestLastKnownLocation(context); onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn, getWifiNetworkSignature(context), c?.first, c?.second))
                         }
                     }
                 )
             }.onFailure {
-                onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn))
+                val c = getBestLastKnownLocation(context); onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn, getWifiNetworkSignature(context), c?.first, c?.second))
             }
         } else {
-            onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn))
+            val c = getBestLastKnownLocation(context); onResult(RadioSnapshot(wifiConnected, getActiveCellSignatures(context), bssid, ssid, locOn, getWifiNetworkSignature(context), c?.first, c?.second))
         }
     }
 
