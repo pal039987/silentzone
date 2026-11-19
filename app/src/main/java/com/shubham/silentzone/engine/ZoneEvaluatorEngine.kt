@@ -84,6 +84,7 @@ object ZoneEvaluatorEngine {
         runCatching {
             val existingId = prefs.getString(ZEN_RULE_PREF_ID, null)
             val ruleName = "SilentZone Guard"
+            val ownerComponent = android.content.ComponentName(context, SilentZoneConditionService::class.java)
             val configActivity = android.content.ComponentName(context, com.shubham.silentzone.MainActivity::class.java)
             val conditionId = android.net.Uri.Builder()
                 .scheme("condition")
@@ -95,7 +96,7 @@ object ZoneEvaluatorEngine {
             if (ruleId == null || nm.getAutomaticZenRule(ruleId) == null) {
                 val zenRule = android.app.AutomaticZenRule(
                     ruleName,
-                    null,
+                    ownerComponent,
                     configActivity,
                     conditionId,
                     null,

@@ -66,5 +66,13 @@
             </intent-filter>
         </receiver>
 
+            <service
+            android:name=".engine.SilentZoneConditionService"
+            android:permission="android.permission.BIND_CONDITION_PROVIDER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.ConditionProviderService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
