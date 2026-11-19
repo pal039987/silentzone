@@ -62,9 +62,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             LaunchedEffect(Unit) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    ZoneEvaluatorEngine.evaluateNow(applicationContext)
-                }
+                ZoneEvaluatorEngine.registerWifiWatcher(applicationContext)
             }
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -315,6 +313,16 @@ fun SilentZoneApp() {
                             nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
                         }
                         am.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        val cleared = ActiveZoneStatus(
+                            isMutedByApp = false,
+                            activeZoneName = null,
+                            matchedReason = "Normal Ring Mode",
+                            lastEvaluatedAt = System.currentTimeMillis(),
+                            previousRingerMode = AudioManager.RINGER_MODE_NORMAL
+                        )
+                        repo.saveStatus(cleared)
+                        status = cleared
+                        com.shubham.silentzone.engine.ZoneGuardService.syncServiceState(context)
                         Toast.makeText(context, "Normal Ring Restored", Toast.LENGTH_SHORT).show()
                     }
                 )
