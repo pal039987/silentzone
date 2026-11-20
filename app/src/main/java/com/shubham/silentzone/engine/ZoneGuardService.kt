@@ -33,12 +33,14 @@ class ZoneGuardService : Service() {
         @Volatile
         private var running = false
 
-        private fun hasEnabledRules(context: Context): Boolean =
-            ZoneRepository(context).getRules().any { it.isEnabled }
+        private fun isZoneCurrentlyActive(context: Context): Boolean {
+            val repo = ZoneRepository(context)
+            return repo.getStatus().isMutedByApp && repo.getRules().any { it.isEnabled }
+        }
 
         fun syncServiceState(context: Context) {
             val appCtx = context.applicationContext
-            val shouldRunGuard = hasEnabledRules(appCtx)
+            val shouldRunGuard = isZoneCurrentlyActive(appCtx)
             val intent = Intent(appCtx, ZoneGuardService::class.java)
             runCatching {
                 if (shouldRunGuard) {
@@ -109,7 +111,7 @@ class ZoneGuardService : Service() {
     /** Evaluates on a background thread, then (on the main thread) refreshes the notification or stops. */
     private fun evaluateAndRefresh() {
         ZoneEvaluatorEngine.evaluateNow(applicationContext) {
-            if (!hasEnabledRules(applicationContext)) {
+            if (!isZoneCurrentlyActive(applicationContext)) {
                 stopGuardCleanly()
             } else {
                 updateNotification()
@@ -134,7 +136,7 @@ class ZoneGuardService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!hasEnabledRules(applicationContext)) {
+        if (!isZoneCurrentlyActive(applicationContext)) {
             stopGuardCleanly()
             return START_NOT_STICKY
         }
@@ -159,7 +161,7 @@ class ZoneGuardService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // User swiped the app away from recents: bring the guard back right away
-        if (hasEnabledRules(applicationContext)) {
+        if (isZoneCurrentlyActive(applicationContext)) {
             val restartIntent = Intent(applicationContext, ZoneGuardService::class.java)
             val pi = PendingIntent.getService(
                 applicationContext,
@@ -196,7 +198,7 @@ class ZoneGuardService : Service() {
             }
             val rx = object : android.content.BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
-                    handler.postDelayed({ evaluateAndRefresh() }, 300L)
+                    handler.postDelayed({ evaluateAndRefresh() }, 3500L)
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
