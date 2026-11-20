@@ -476,6 +476,7 @@ object ZoneEvaluatorEngine {
                     // OS-owned AutomaticZenRule (Android auto-restores Normal Ring if the app is uninstalled).
                     // Policy = ring/notification silent, media + alarms still audible.
                     setOsOwnedDndState(context, notifManager, true, zoneName)
+                    if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) { audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT }
                     audioHandler.postDelayed({
                         runCatching {
                             setOsOwnedDndState(context, notifManager, true, zoneName)
