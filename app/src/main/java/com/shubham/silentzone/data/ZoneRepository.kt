@@ -85,6 +85,27 @@ class ZoneRepository(context: Context) {
         prefs.edit().putString("status_json", gson.toJson(status)).commit()
     }
 
+    /** Wall-clock ms since when the zone's Wi-Fi has been continuously "not matching" (0 = matching / unknown). */
+    fun getWifiLostSince(): Long = prefs.getLong("wifi_lost_since", 0L)
+
+    fun setWifiLostSince(value: Long) {
+        prefs.edit().putLong("wifi_lost_since", value).apply()
+    }
+
+    /** "Quick Unmute": while now < this value the zones are paused and the phone stays un-muted. */
+    fun getSnoozeUntil(): Long = prefs.getLong("snooze_until", 0L)
+
+    fun setSnoozeUntil(value: Long) {
+        prefs.edit().putLong("snooze_until", value).apply()
+    }
+
+    /** While now < this value, a VIP call is ringing and the zone must NOT re-mute the phone. */
+    fun getBypassUntil(): Long = prefs.getLong("vip_bypass_until", 0L)
+
+    fun setBypassUntil(value: Long) {
+        prefs.edit().putLong("vip_bypass_until", value).apply()
+    }
+
     fun recordIncomingCall(normalizedNumber: String): Int {
         val now = System.currentTimeMillis()
         val windowMs = 3 * 60 * 1000L

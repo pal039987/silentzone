@@ -20,31 +20,79 @@ import com.shubham.silentzone.MainActivity
 import com.shubham.silentzone.R
 import com.shubham.silentzone.data.ZoneRepository
 
+/**
+ * Keeps SilentZone alive for as long as at least one zone toggle is ON (screen on OR off), so the OS
+ * does not freeze/kill the app and Wi-Fi / time / location changes are always noticed.
+ */
 class ZoneGuardService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "silentzone_guard_channel"
         private const val NOTIF_ID = 1001
 
+        @Volatile
+        private var running = false
+
+        private fun hasEnabledRules(context: Context): Boolean =
+            ZoneRepository(context).getRules().any { it.isEnabled }
+
         fun syncServiceState(context: Context) {
-            val repo = ZoneRepository(context)
-            val hasEnabledRules = repo.getRules().any { it.isEnabled }
-            val status = repo.getStatus()
-            val shouldRunGuard = hasEnabledRules && status.isMutedByApp
-            val intent = Intent(context, ZoneGuardService::class.java)
+            val appCtx = context.applicationContext
+            val shouldRunGuard = hasEnabledRules(appCtx)
+            val intent = Intent(appCtx, ZoneGuardService::class.java)
             runCatching {
                 if (shouldRunGuard) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(intent)
+                    if (running) {
+                        // Already alive: just refresh what the notification says
+                        refreshNotification(appCtx)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        appCtx.startForegroundService(intent)
                     } else {
-                        context.startService(intent)
+                        appCtx.startService(intent)
                     }
                 } else {
-                    context.stopService(intent)
-                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    appCtx.stopService(intent)
+                    val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     nm.cancel(NOTIF_ID)
                 }
             }
+        }
+
+        private fun refreshNotification(context: Context) {
+            runCatching {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(NOTIF_ID, buildNotification(context))
+            }
+        }
+
+        private fun buildNotification(context: Context): Notification {
+            val repo = ZoneRepository(context)
+            val status = repo.getStatus()
+            val enabledCount = repo.getRules().count { it.isEnabled }
+            val title: String
+            val text: String
+            if (status.isMutedByApp) {
+                title = "Active Zone: ${status.activeZoneName ?: "Muted"}"
+                text = status.matchedReason
+            } else {
+                title = "SilentZone is watching"
+                text = "$enabledCount zone(s) ON - will silence automatically"
+            }
+            val openAppIntent = PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            return NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_silentzone)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(openAppIntent)
+                .setOngoing(true)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
         }
     }
 
@@ -53,35 +101,40 @@ class ZoneGuardService : Service() {
 
     private val periodicCheck = object : Runnable {
         override fun run() {
-            ZoneEvaluatorEngine.evaluateNow(applicationContext)
-            val repo = ZoneRepository(applicationContext)
-            val stillActive = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
-            if (!stillActive) {
-                stopGuardCleanly()
-                return
-            }
-            updateNotification()
+            evaluateAndRefresh()
             handler.postDelayed(this, 60_000L)
+        }
+    }
+
+    /** Evaluates on a background thread, then (on the main thread) refreshes the notification or stops. */
+    private fun evaluateAndRefresh() {
+        ZoneEvaluatorEngine.evaluateNow(applicationContext) {
+            if (!hasEnabledRules(applicationContext)) {
+                stopGuardCleanly()
+            } else {
+                updateNotification()
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        val notif = buildNotification()
+        val notif = buildNotification(applicationContext)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NOTIF_ID, notif)
         }
+        running = true
         registerScreenReceiver()
+        // Live Wi-Fi callback inside this always-alive process
+        ZoneEvaluatorEngine.registerWifiWatcher(applicationContext)
         handler.postDelayed(periodicCheck, 60_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val repo = ZoneRepository(applicationContext)
-        val shouldRun = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
-        if (!shouldRun) {
+        if (!hasEnabledRules(applicationContext)) {
             stopGuardCleanly()
             return START_NOT_STICKY
         }
@@ -105,9 +158,8 @@ class ZoneGuardService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val repo = ZoneRepository(applicationContext)
-        val shouldRestart = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
-        if (shouldRestart) {
+        // User swiped the app away from recents: bring the guard back right away
+        if (hasEnabledRules(applicationContext)) {
             val restartIntent = Intent(applicationContext, ZoneGuardService::class.java)
             val pi = PendingIntent.getService(
                 applicationContext,
@@ -122,6 +174,7 @@ class ZoneGuardService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         handler.removeCallbacks(periodicCheck)
         unregisterScreenReceiver()
         runCatching {
@@ -138,20 +191,12 @@ class ZoneGuardService : Service() {
         runCatching {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             val rx = object : android.content.BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
-                    handler.postDelayed({
-                        ZoneEvaluatorEngine.evaluateNow(applicationContext)
-                        val repo = ZoneRepository(applicationContext)
-                        val stillActive = repo.getRules().any { it.isEnabled } && repo.getStatus().isMutedByApp
-                        if (!stillActive) {
-                            stopGuardCleanly()
-                        } else {
-                            updateNotification()
-                        }
-                    }, 300L)
+                    handler.postDelayed({ evaluateAndRefresh() }, 300L)
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -179,7 +224,7 @@ class ZoneGuardService : Service() {
                 "SilentZone Background Guard",
                 NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Active only while inside a SilentZone"
+                description = "Keeps SilentZone running while at least one zone is turned ON"
                 setShowBadge(false)
             }
             val nm = getSystemService(NotificationManager::class.java)
@@ -187,31 +232,7 @@ class ZoneGuardService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
-        val status = ZoneRepository(applicationContext).getStatus()
-        val title = "Active Zone: ${status.activeZoneName ?: "Muted"}"
-        val text = status.matchedReason
-        val openAppIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_silentzone)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(openAppIntent)
-            .setOngoing(true)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .build()
-    }
-
     private fun updateNotification() {
-        runCatching {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(NOTIF_ID, buildNotification())
-        }
+        refreshNotification(applicationContext)
     }
 }

@@ -86,13 +86,17 @@ object RadioFingerprintScanner {
         }.getOrNull()
     }
 
-    fun captureCurrentEnvironment(context: Context): RadioSnapshot {
+    /**
+     * @param includeLocation false = skip the (slow, blocking) cell-tower and GPS lookups. The background
+     * evaluator passes false when no enabled zone uses the location trigger.
+     */
+    fun captureCurrentEnvironment(context: Context, includeLocation: Boolean = true): RadioSnapshot {
         val wifiConnected = isConnectedToWifi(context)
         val locOn = isLocationEnabled(context)
         val netSig = if (wifiConnected) getWifiNetworkSignature(context) else null
-        val cells = if (locOn) getActiveCellSignatures(context) else emptyList()
+        val cells = if (locOn && includeLocation) getActiveCellSignatures(context) else emptyList()
         val (bssid, ssid) = if (locOn) getConnectedWifiInfo(context) else Pair(null, null)
-        val coords = if (locOn) getBestLastKnownLocation(context) else null
+        val coords = if (locOn && includeLocation) getBestLastKnownLocation(context) else null
         return RadioSnapshot(wifiConnected, cells, bssid, ssid, locOn, netSig, coords?.first, coords?.second)
     }
 

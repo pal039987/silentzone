@@ -134,11 +134,17 @@ fun SilentZoneApp() {
     var dndGranted by remember { mutableStateOf(hasDndPermission(context)) }
 
     fun refreshAll() {
+        // Show what is stored right now (cheap), then re-evaluate on a background thread and refresh again.
+        // Evaluating on the UI thread was the cause of the scroll lag.
         dndGranted = hasDndPermission(context)
-        ZoneEvaluatorEngine.evaluateNow(context)
         rules = repo.getRules()
         status = repo.getStatus()
         vipConfig = repo.getVipConfig()
+        ZoneEvaluatorEngine.evaluateNow(context) {
+            dndGranted = hasDndPermission(context)
+            rules = repo.getRules()
+            status = repo.getStatus()
+        }
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -280,6 +286,7 @@ fun SilentZoneApp() {
                     vipConfig = vipConfig,
                     dndGranted = dndGranted,
                     onToggleRule = { id, enabled ->
+                        if (enabled) repo.setSnoozeUntil(0L)
                         val turnedOffOther = repo.toggleRule(id, enabled)
                         refreshAll()
                         if (turnedOffOther != null) {
@@ -309,28 +316,19 @@ fun SilentZoneApp() {
                         )
                     },
                     onQuickRestoreRing = {
-                        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        if (nm.isNotificationPolicyAccessGranted) {
-                            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+                        // Restores normal ring AND pauses the zones for 30 min, otherwise the next
+                        // evaluation would mute the phone again within seconds.
+                        ZoneEvaluatorEngine.quickUnmute(context, 30 * 60 * 1000L) {
+                            rules = repo.getRules()
+                            status = repo.getStatus()
                         }
-                        am.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                        val cleared = ActiveZoneStatus(
-                            isMutedByApp = false,
-                            activeZoneName = null,
-                            matchedReason = "Normal Ring Mode",
-                            lastEvaluatedAt = System.currentTimeMillis(),
-                            previousRingerMode = AudioManager.RINGER_MODE_NORMAL
-                        )
-                        repo.saveStatus(cleared)
-                        status = cleared
-                        com.shubham.silentzone.engine.ZoneGuardService.syncServiceState(context)
-                        Toast.makeText(context, "Normal Ring Restored", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Unmuted for 30 min", Toast.LENGTH_SHORT).show()
                     }
                 )
                 1 -> AddZoneScreen(
                     dndGranted = dndGranted,
                     onSaveRule = { newRule ->
+                        repo.setSnoozeUntil(0L)
                         repo.addOrUpdateRule(newRule)
                         refreshAll()
                         selectedTab = 0
@@ -599,6 +597,46 @@ fun DashboardScreen(
                             ) {
                                 Text("Allow Background Auto-Switch", color = Color(0xFFFDE68A))
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Keep-alive tip: phone makers (Oppo/Realme/Vivo/Xiaomi...) have their own background switches
+        // that no app can turn on by itself.
+        if (rules.any { it.isEnabled }) {
+            item(key = "keepalive_tip", contentType = "banner") {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, Color(0xFF28354F)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Works with screen OFF too", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(
+                            "If your phone still stops SilentZone in the background, open App Settings > Battery " +
+                                "and set it to \"Allow background activity\" / \"Unrestricted\", and turn ON " +
+                                "\"Auto-launch\" (Oppo, Realme, Vivo, Xiaomi).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF94A3B8)
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.parse("package:${context.packageName}")
+                                        )
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Open App Settings", color = Color(0xFF6EE7B7))
                         }
                     }
                 }

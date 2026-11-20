@@ -13,7 +13,15 @@ class WifiWakeJobService : JobService() {
     companion object {
         private const val JOB_ID = 7071
 
-        fun scheduleWifiWake(context: Context) {
+        // Minimum gap before the job may run again. Without it the job is immediately runnable again
+        // while Wi-Fi is connected -> endless job -> evaluate -> reschedule -> job loop.
+        private const val RERUN_DELAY_MS = 60_000L
+
+        /**
+         * @param force true = (re)schedule even if a job is already pending (used from onStartJob).
+         * Normal callers (evaluateNow) must NOT reschedule an existing job every time.
+         */
+        fun scheduleWifiWake(context: Context, force: Boolean = false) {
             val repo = ZoneRepository(context)
             val hasWifiRules = repo.getRules().any { it.isEnabled && it.isWifiTriggerActive() }
             val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
@@ -21,9 +29,12 @@ class WifiWakeJobService : JobService() {
                 scheduler.cancel(JOB_ID)
                 return
             }
+            if (!force && scheduler.getPendingJob(JOB_ID) != null) return
+
             val component = ComponentName(context, WifiWakeJobService::class.java)
             val jobInfo = JobInfo.Builder(JOB_ID, component)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)
+                .setMinimumLatency(RERUN_DELAY_MS)
                 .setPersisted(true)
                 .build()
             runCatching { scheduler.schedule(jobInfo) }
@@ -31,15 +42,18 @@ class WifiWakeJobService : JobService() {
     }
 
     override fun onStartJob(params: JobParameters?): Boolean {
-        ZoneEvaluatorEngine.evaluateNow(applicationContext)
-        // Re-schedule so future Wi-Fi connections also wake the app
-        scheduleWifiWake(applicationContext)
-        jobFinished(params, false)
-        return false
+        // Evaluation is asynchronous; finish the job only when it is done
+        ZoneEvaluatorEngine.evaluateNow(applicationContext) {
+            // Finish first, then re-arm (scheduling while still running would stop this very job).
+            // The re-armed job has a delay, so there is no hot loop.
+            jobFinished(params, false)
+            scheduleWifiWake(applicationContext, force = true)
+        }
+        return true
     }
 
     override fun onStopJob(params: JobParameters?): Boolean {
-        scheduleWifiWake(applicationContext)
+        // Ask the system to retry later with its own back-off instead of rescheduling by hand
         return true
     }
 }

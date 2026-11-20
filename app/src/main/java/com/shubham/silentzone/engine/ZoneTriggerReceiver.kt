@@ -19,16 +19,22 @@ class ZoneTriggerReceiver : BroadcastReceiver() {
             val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
+                    // Must be immediate (before the ringtone starts) and is cheap -> stays synchronous
                     ZoneEvaluatorEngine.handleIncomingCallBypass(appCtx, incomingNumber)
                 }
                 TelephonyManager.EXTRA_STATE_IDLE -> {
+                    // Call finished: allow the zone to mute again
+                    val pending = goAsync()
+                    ZoneEvaluatorEngine.clearCallBypass(appCtx)
                     Handler(Looper.getMainLooper()).postDelayed({
-                        ZoneEvaluatorEngine.evaluateNow(appCtx)
+                        ZoneEvaluatorEngine.evaluateNow(appCtx) { pending?.finish() }
                     }, 2500L)
                 }
             }
         } else {
-            ZoneEvaluatorEngine.evaluateNow(appCtx)
+            // Evaluation runs on a background thread; goAsync keeps this process alive until it is done
+            val pending = goAsync()
+            ZoneEvaluatorEngine.evaluateNow(appCtx) { pending?.finish() }
         }
     }
 }
