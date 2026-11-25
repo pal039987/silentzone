@@ -72,7 +72,12 @@ object RadioFingerprintScanner {
         if (!hasFine && !hasCoarse || !isLocationEnabled(context)) return null
         return runCatching {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+            val providers = buildList {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(LocationManager.FUSED_PROVIDER)
+                add(LocationManager.GPS_PROVIDER)
+                add(LocationManager.NETWORK_PROVIDER)
+                add(LocationManager.PASSIVE_PROVIDER)
+            }
             var best: Location? = null
             for (p in providers) {
                 if (lm.isProviderEnabled(p)) {
