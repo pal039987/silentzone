@@ -264,6 +264,13 @@ object ZoneEvaluatorEngine {
         val currentStatus = repo.getStatus()
         val needsLocation = rules.any { it.isLocationTriggerActive() }
         val snapshot = RadioFingerprintScanner.captureCurrentEnvironment(context, includeLocation = needsLocation)
+        if (needsLocation && snapshot.isSystemLocationEnabled && snapshot.latitude == null) {
+            uiHandler.post {
+                RadioFingerprintScanner.captureFreshEnvironmentAsync(context) {
+                    evaluateNow(context)
+                }
+            }
+        }
         val now = System.currentTimeMillis()
 
         val matchedRule = rules.firstOrNull { rule -> matchesRule(rule, snapshot) }
@@ -341,26 +348,43 @@ object ZoneEvaluatorEngine {
             }
 
             if (activeRule.isWifiTriggerActive()) {
-                // "Gone" = Wi-Fi off, OR connected to a different (recognisable) network.
-                // Connected but router signature not readable yet = still waking up -> not gone.
+                val wifiMgr = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+                val isWifiRadioEnabled = runCatching { wifiMgr.isWifiEnabled }.getOrDefault(true)
                 val wifiGone = !snapshot.isWifiConnected ||
                         (!snapshot.wifiNetworkSignature.isNullOrBlank() && !matchesWifiOnly(activeRule, snapshot))
-                if (wifiGone) {
-                    if (repo.getWifiLostSince() == 0L) repo.setWifiLostSince(now)
+                if (isScreenOn && !isWifiRadioEnabled) {
+                    // User turned Wi-Fi toggle OFF -> exit immediately
+                    repo.setWifiLostSince(0L)
+                    exits.add(true)
+                } else if (!isScreenOn) {
+                    // Screen is OFF: ColorOS/Realme puts Wi-Fi to sleep, so NEVER unmute due to Wi-Fi sleep off-screen
+                    repo.setWifiLostSince(0L)
+                    exits.add(false)
+                } else if (wifiGone) {
+                    // Screen is ON & Wi-Fi toggle is ON: give radio 12s to wake from sleep & reconnect
+                    if (repo.getWifiLostSince() == 0L) {
+                        repo.setWifiLostSince(now)
+                        evalHandler.postDelayed({ evaluateNow(context) }, 12_500L)
+                    }
+                    val lostFor = now - repo.getWifiLostSince()
+                    exits.add(lostFor >= 12_000L)
                 } else {
                     repo.setWifiLostSince(0L)
+                    exits.add(false)
                 }
-                val lostFor = repo.getWifiLostSince().let { if (it == 0L) 0L else now - it }
-                val grace = if (isScreenOn) 0L else SCREEN_OFF_EXIT_GRACE_MS
-                exits.add(wifiGone && lostFor >= grace)
             }
 
             if (activeRule.isLocationTriggerActive()) {
-                exits.add(
-                    activeRule.latitude != null && activeRule.longitude != null &&
-                            snapshot.latitude != null && snapshot.longitude != null &&
-                            !matchesLocationOnly(activeRule, snapshot)
-                )
+                if (!snapshot.isSystemLocationEnabled) {
+                    // User turned phone Location OFF -> exit immediately
+                    exits.add(true)
+                } else {
+                    exits.add(
+                        activeRule.latitude != null && activeRule.longitude != null &&
+                                snapshot.latitude != null && snapshot.longitude != null &&
+                                !matchesLocationOnly(activeRule, snapshot)
+                    )
+                }
             }
 
             val keepLocked = exits.isNotEmpty() && !exits.all { it }

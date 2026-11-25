@@ -203,10 +203,19 @@ class ZoneGuardService : Service() {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
+                addAction(android.location.LocationManager.PROVIDERS_CHANGED_ACTION)
+                addAction(android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION)
             }
             val rx = object : android.content.BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
-                    handler.postDelayed({ evaluateAndRefresh() }, 3500L)
+                    val act = intent?.action
+                    if (act == android.location.LocationManager.PROVIDERS_CHANGED_ACTION ||
+                        act == android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION
+                    ) {
+                        evaluateAndRefresh()
+                    } else {
+                        handler.postDelayed({ evaluateAndRefresh() }, 3500L)
+                    }
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
